@@ -2,7 +2,6 @@
 #include <stdlib.h>
 
 //COLORS
-#define RED "\e[31m"
 #define GRN "\e[32m"
 #define RESET "\e[0m"
 
