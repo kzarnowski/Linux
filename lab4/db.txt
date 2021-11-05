@@ -1,0 +1,18 @@
+// baza danych
+// 3 kolumny: int32 (klucz), char[16], double
+// r, w - parametry, r jest obowiazkowe obowiazkowe
+// k - liczba integer 32
+// i - info (opcjonalne) jak za dlugie to ma byc skrocone
+// v = double
+//
+// jezeli ejst podane w to musi byc podane k, i natomiast v jest opcjonalne
+// jeżeli jest podane r to klucz jest obowiązkowy, reszta zabroniona
+//
+// r - zapisz do bazy
+// w - odczytaj z bazy
+//
+// -d wtedy klucz obowiazkowy, ma znalezc klucz i go usunac (wpisac -1 w polu kluczu w bazie)
+//
+// lseek - potrzebne do przesuwania sie
+//
+// jako ostatni argument przyjmuje nazwe pliku bazy danych
