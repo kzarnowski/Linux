@@ -84,10 +84,11 @@ int db_read() {
 }
 
 int db_write(int fd) {
-	char* format = "%d\t%s\t%lf\n";
+	char* format = "%-5d  %-.16s  %-10.4lf\n";
 	char line[LINE_LENGTH];
 	snprintf(line, LINE_LENGTH, format, data.key, data.info, data.value);
 	ssize_t len = write(fd, line, LINE_LENGTH);
+	printf("%d\n", (int)len);
 	return len == LINE_LENGTH ? 0 : 1;
 }
 
@@ -134,8 +135,8 @@ int parse_args(int argc, char** argv) {
 		}
 	}
 
-	printf("IS_SET:\nk: %d\ni: %d\nv: %d\n", isset_k, isset_i, isset_v);
-	printf("VALUES:\nmode: %d\nkey: %d\ninfo: %s\nvalue: %lf\n", mode, data.key, data.info, data.value);
+	//printf("IS_SET:\nk: %d\ni: %d\nv: %d\n", isset_k, isset_i, isset_v);
+	//printf("VALUES:\nmode: %d\nkey: %d\ninfo: %s\nvalue: %lf\n", mode, data.key, data.info, data.value);
 	return 0;
 }
 
