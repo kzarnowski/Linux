@@ -30,8 +30,11 @@ int parse_mode(int argc, char** argv) {
 
 void db_read(int argc, char** argv) {
 	int option;
-	while (option = getopt(argc, argc)	
+	while (option = getopt(argc, argc, "rk") != -1) {
+		
+	}	
 }
+
 
 void db_write(int argc, char** argv) {
 	
