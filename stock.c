@@ -26,13 +26,14 @@ int main() {
     for (int i = 0; i < N; i++) {
         idx += snprintf(tab + idx, 200 - idx, format, names[i], num[i] /*> 500 ? GRN : RED, num[i]*/);
     }
-    tab[idx-2] = '\n';
-    tab[idx-1] = '\0';
+    //tab[idx-2] = '\n';
+    //tab[idx-1] = '\0';
    
 	int start_idx = 0;
 	int tail_len;
 	while(1) {
 		tail_len = printf("%.40s\r", &tab[start_idx]);
+		fflush(stdout);
 		start_idx = (start_idx + 1) % 40;
 		usleep(1000000);
 	}	

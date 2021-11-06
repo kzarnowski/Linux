@@ -3,12 +3,18 @@
 #include <getopt.h>
 #include <math.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#define LINE_LENGTH 40
 
 typedef struct {
 	int32_t key;
 	char info[16];
 	double value;
 } RECORD;
+
+RECORD data = { -1, {'\0'}, -1.0};
 
 //  MODE:  
 //  1 - read
@@ -18,21 +24,78 @@ typedef struct {
 
 int mode = -1;
 char* mode_name;
-int32_t key = -1;
-char info[16] = {'\0'};
-double value;
+//int32_t key = -1;
+//char info[16] = {'\0'};
+//double value;
 
-int isset_mode = 0, isset_k = 0, isset_i = 0, isset_v = 0, arg_err = 0;
+int isset_mode = 0, isset_k = 0, isset_i = 0, isset_v = 0;
 
-void parse_args(int argc, char** argv);
-void check_args(); 
+int parse_args(int argc, char** argv);
+int check_args();
+int db_read();
+int db_write();
+int db_delete();
 
 int main(int argc, char** argv) {
-	parse_args(argc, argv);
-	check_args();
+	int res;
+
+	// Parse arguments and assign them to global variables	
+	res = parse_args(argc, argv);
+	if (res != 0) {
+		return res;
+	}
+
+	// Validate arguments' values
+	res = check_args();
+	if (res != 0) {
+		return res;
+	}
+
+	// Open database in correct mode
+	const char* path = argv[argc-1];
+	int fd;
+
+	if (mode == 1) {
+		fd = open(path, O_RDONLY);
+		res = db_read(fd);
+	} else if (mode == 2) {
+		fd = open(path, O_WRONLY | O_APPEND | O_CREAT, S_IRWXU);
+		res = db_write(fd);
+	} else if (mode == 3) {
+		fd = open(path, O_WRONLY);
+		res = db_delete(fd);
+	}
+	
+	if (res != 0) {
+		// db error
+	}
+	
+	res = close(fd);
+	
+	if (res == -1) {
+		// close error
+	}
+
+	return 0;
 }
 
-void parse_args(int argc, char** argv) {
+int db_read() {
+	return 0;
+}
+
+int db_write(int fd) {
+	char* format = "%d\t%s\t%lf\n";
+	char line[LINE_LENGTH];
+	snprintf(line, LINE_LENGTH, format, data.key, data.info, data.value);
+	ssize_t len = write(fd, line, LINE_LENGTH);
+	return len == LINE_LENGTH ? 0 : 1;
+}
+
+int db_delete() {
+	return 0;
+}
+
+int parse_args(int argc, char** argv) {
 	int option;
 	char* end;
 
@@ -55,46 +118,54 @@ void parse_args(int argc, char** argv) {
 				break;
 			case 'k':
 				isset_k = 1;
-				key = (int32_t)(strtol(optarg, &end, 10));
+				data.key = (int32_t)(strtol(optarg, &end, 10));
 				break;
 			case 'i':
 				isset_i = 1;
-				strcpy(info, optarg);
+				strcpy(data.info, optarg);
 			   	break;
 			case 'v':
 				isset_v = 1;
-				value = strtod(optarg, NULL);
+				data.value = strtod(optarg, NULL);
 				break;
 			default:
-				arg_err = 1;
-				break;
+				fprintf(stderr, "Unvalid argument found\n");
+				return 1;
 		}
 	}
 
 	printf("IS_SET:\nk: %d\ni: %d\nv: %d\n", isset_k, isset_i, isset_v);
-	printf("VALUES:\nmode: %d\nkey: %d\ninfo: %s\nvalue: %lf\nargerr: %d\n", mode, key, info, value, arg_err);
+	printf("VALUES:\nmode: %d\nkey: %d\ninfo: %s\nvalue: %lf\n", mode, data.key, data.info, data.value);
+	return 0;
 }
 
 int check_args() {
-	if (arg_err) {
-		fprintf(stderr, "Unvalid argument\n");
-		return 1;
-	} 
+	int result = 0;
 	
 	if (mode == -1) {
 		fprintf(stderr, "Mode error\n");
-		return 2;
+		result = 2;
 	}	
 
 	if (mode == 1 || mode == 3) {
-		if (isset_k == 0) 
+		if (isset_k == 0) {
 			fprintf(stderr, "You must provide key in %s mode.\n", mode_name);
-		if (isset_v || isset_i)
+			result = 3;
+		}
+		if (isset_v || isset_i) {
 			fprintf(stderr, "Arguments other than key are forbidden in %s mode.\n", mode_name);
-			
+			result = 4;
+		}
 	}
 	
+	if (mode == 2) {
+		if (isset_k == 0 || isset_i == 0) {
+			fprintf(stderr, "You must provide key and info in %s mode.\n", mode_name);
+			result = 5;
+		}
+	}
 
+	return result;
 }
 
 
