@@ -3,10 +3,14 @@
 #include <getopt.h>
 #include <math.h>
 #include <string.h>
-#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #define LINE_LENGTH 40
+size_t LINE_SIZE = sizeof(char) * LINE_LENGTH;
+char* format = "%-7d  %-16s  %-10.6lf";
 
 typedef struct {
 	int32_t key;
@@ -79,17 +83,30 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-int db_read() {
+int db_read(int fd) {
+	char line[LINE_LENGTH] = {'\0'};
+	off_t end = lseek(fd, 0, SEEK_END);
+	off_t start = lseek(fd, 0, SEEK_SET);
+	ssize_t len;	
+	while (start != end) {
+		len = read(fd, (void*)line, LINE_SIZE);
+		if (len < LINE_SIZE) {
+			// error
+		}
+		int kkk;
+		len = sscanf(line, "%d %s %lf", &(data.key), data.info, &(data.value)); 
+		printf("%s", line);
+		start += LINE_SIZE;
+	}	
 	return 0;
 }
 
 int db_write(int fd) {
-	char* format = "%-5d  %-.16s  %-10.4lf\n";
 	char line[LINE_LENGTH];
 	snprintf(line, LINE_LENGTH, format, data.key, data.info, data.value);
-	ssize_t len = write(fd, line, LINE_LENGTH);
-	printf("%d\n", (int)len);
-	return len == LINE_LENGTH ? 0 : 1;
+	line[LINE_LENGTH-2] = '\n';
+	ssize_t len = write(fd, line, LINE_SIZE);
+	return len == LINE_SIZE ? 0 : 1;
 }
 
 int db_delete() {
@@ -123,7 +140,7 @@ int parse_args(int argc, char** argv) {
 				break;
 			case 'i':
 				isset_i = 1;
-				strcpy(data.info, optarg);
+				strncpy(data.info, optarg, 16);
 			   	break;
 			case 'v':
 				isset_v = 1;
