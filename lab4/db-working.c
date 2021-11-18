@@ -26,6 +26,8 @@ RECORD data = { -1, {'\0'}, -1.0};
 //  3 - delete
 // -1 - error
 
+int fd;
+
 int mode = -1;
 char* mode_name;
 int32_t key = -1;
@@ -39,7 +41,7 @@ int check_args();
 int db_read();
 int db_write();
 int db_delete();
-off_t find_record(int fd, int key);
+off_t find_record(int key);
 
 
 int main(int argc, char** argv) {
@@ -59,13 +61,11 @@ int main(int argc, char** argv) {
 
 	// Open database in correct mode
 	const char* path = argv[argc-1];
-	int fd;
 
 	if (mode == 1) {
 		fd = open(path, O_RDONLY);
 		res = db_read(fd);
 		if (res != 0) {
-			fprintf(stderr, "Item with key = %d was not found.\n", key);
 			return 1;
 		}
 	} else if (mode == 2) {
@@ -90,43 +90,57 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-int db_read(int fd) {
+int db_read() {
+	off_t start = lseek(fd, find_record(key), SEEK_SET);
 	char line[LINE_LENGTH] = {'\0'};
-	off_t end = lseek(fd, 0, SEEK_END);
-	off_t start = lseek(fd, 0, SEEK_SET);
-	ssize_t len;	
-	while (start != end) {
-		len = read(fd, (void*)line, LINE_SIZE);
-		if (len < LINE_SIZE) {
-			// error
-		}
-		sscanf(line, "%d %s %lf", &(data.key), data.info, &(data.value)); 
-		if (key == data.key) {
-			printf("%s\n", line);
-			return 0;
-		}
-
-		start += LINE_SIZE;
-	}	
-	return 1;
+	if (start == -1) {
+		fprintf(stderr, "Item with key = %d was not found.\n", key);
+		return 1;
+	}
+	ssize_t len = read(fd, (void*)line, LINE_SIZE);
+	if (len < LINE_SIZE) {
+		fprintf(stderr, "Error when reading line key = %d\n", key);
+	}
+	printf("%s\n", line);
+	return 0;
 }
 
-int db_write(int fd) {
+
+int db_write() {
+	/*
+	Write new record into database.
+	If there is empty line (record deleted before), write into that 
+	free space instead of appending at the end of file.
+	*/
 	RECORD data;
 	data.key = key;
 	strcpy(data.info, info);
 	data.value = value;
-	char line[LINE_LENGTH];
+	char line[LINE_LENGTH]; // prepare line which will be written into db
 	snprintf(line, LINE_LENGTH, format, data.key, data.info, data.value);
 	line[LINE_LENGTH-2] = '\n';
-	ssize_t len = write(fd, line, LINE_SIZE);
+	ssize_t len;
+	off_t empty_line = find_record(-1); // search for an empty line in db
+	printf("%ld\n", empty_line);
+	if (empty_line == -1) {
+		// no empty line was found
+		len = write(fd, line, LINE_SIZE);
+	} else {
+		// write new record into free space found
+		lseek(fd, empty_line, SEEK_SET);
+		len = write(fd, line, LINE_SIZE);
+	}
 	return len == LINE_SIZE ? 0 : 1;
 }
 
-int db_delete(int fd) {
-	off_t offset = find_record(fd, key);
+int db_delete() {
+	/*
+	Delete row with a key provided by option argument.
+	Deleting is implemented as setting key to -1.
+	*/
+	off_t offset = find_record(key);
 	if (offset == -1) {
-		fprintf(stderr, "Item with key = %d was not found.", key);
+		fprintf(stderr, "Item with key = %d was not found.\n", key);
 		return 1;
 	}
 	lseek(fd, offset, SEEK_SET);
@@ -142,55 +156,65 @@ int db_delete(int fd) {
 	return 0;
 }
 
-off_t find_record(int fd, int key) {
+off_t find_record(int key) {
+	/*
+	Find a record by given key, return its offset in the file.
+	*/
 	char buffer[LINE_LENGTH];
 	off_t end = lseek(fd, 0, SEEK_END);
 	off_t start = lseek(fd, 0, SEEK_SET);
 	ssize_t len;
 	while (start != end) {
+		// read file line by line
 		buffer[0] = '\0';
 		len = read(fd, (void*)buffer, LINE_SIZE);
 		if (len < LINE_SIZE) {
-			//error
+			fprintf(stderr, "Error while reading line\n");
+			return -1;
 		}
 		sscanf(buffer, "%d %s %lf", &(data.key), data.info, &(data.value));
 		if (key == data.key) {
 			return start;	
 		}
+		start += LINE_SIZE;
 	}
 	return -1;
 }	
 
 int parse_args(int argc, char** argv) {
+	/*
+	Check which command line options were provided.
+	Assign their values into global variables.
+	*/
 	int option;
 	char* end;
 
 	while((option = getopt(argc, argv, "rwdk:i::v::")) != -1) {
 		switch (option) {
-			case 'r':
+			case 'r': // mode: read
 				mode = isset_mode == 0 ? 1 : -1;
 				isset_mode = 1;
 				mode_name = "read";
 				break;
-			case 'w':
+			case 'w': // mode: write
 				mode = isset_mode == 0 ? 2 : -1;
 				isset_mode = 1;
 				mode_name = "write";
 				break;
-			case 'd':
+			case 'd': // mode: delete
 				mode = isset_mode == 0 ? 3 : -1;
 				isset_mode = 1;
 				mode_name = "delete";
 				break;
-			case 'k':
+			case 'k': // db column: key
 				isset_k = 1;
 				key = (int32_t)(strtol(optarg, &end, 10));
 				break;
-			case 'i':
+			case 'i': // db column: info
 				isset_i = 1;
 				strncpy(info, optarg, 16);
 			   	break;
-			case 'v':
+			case 'v': // db column: value
 				isset_v = 1;
 				value = strtod(optarg, NULL);
 				break;
@@ -200,12 +224,13 @@ int parse_args(int argc, char** argv) {
 		}
 	}
 
-	//printf("IS_SET:\nk: %d\ni: %d\nv: %d\n", isset_k, isset_i, isset_v);
-	//printf("VALUES:\nmode: %d\nkey: %d\ninfo: %s\nvalue: %lf\n", mode, data.key, data.info, data.value);
 	return 0;
 }
 
 int check_args() {
+	/*
+	Check if given options are available.
+	*/
 	int result = 0;
 	
 	if (mode == -1) {
