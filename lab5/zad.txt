@@ -1,0 +1,16 @@
+napisać program który wypisze wielkości typów podstawowych
+
+struktura:
+
+short
+char t[15]
+double
+
+wypisać jej rozmiar i sprawdzić ile faktycznie powinna mieć =>
+to będą inne wartości, bo procesor optymalizuje wszystko do 8 bajtów
+
+kompilatory dopasują rozmiary typów w strukturach do 8 bajtów, 
+tzn. jeśli zdefiniujemy żeby struktura przechowywała short, to i tak w pamięci taka struktura zajmie więcej
+
+można przypilnować żeby zaalkowano faktyczny rozmiar:
+atrybut "packed" przy definiowaniu struktur
