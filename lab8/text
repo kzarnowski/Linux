@@ -1,0 +1,10 @@
+czeka 2s
+otwiera plik do zapisu tryb blokujacy
+spi sekunde
+zapisuje komunikaty do potoku (5 krotnie ten sam komunikat, miedzy przejsciami 0.75s czeka)
+jak skonczy to konczy dzialanie
+
+drugi proces:
+probuje otworzyc plik w trybie nieblokujacym, az w koncu mu sie uda (miedzy kolejnymi probami jest 0.4s przerwy) przy kazdej probie wypisuje komunikat udalo sie czy nie
+
+jak sie uda otworzyc, to wypisuje odczytanie komunikaty, miedzy nimi robi 0.4s przerwy, gdy stwierdzi że nie ma szans juz nic odczytac z fifo to zamyka swoja strone fifo i konczy dzialanie

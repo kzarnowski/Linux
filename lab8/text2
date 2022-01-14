@@ -1,0 +1,11 @@
+program towrzy pipe i potomka.
+Rodzic w petli wpisuje komunikaty, opoznienie jest 0.6s (cały czas)
+
+Potomek czeka na komunikaty, po odczytaniu 5 komunikatow popelnia samobojstwo
+
+Zostanie wyslany sygnal ktory zabije rodzica.
+
+Nalezy naprawic ta sytuacje: proces rodzica ma wypisac komunikat ze zostanie zabity i dopiero wtedy moze sie zakonczyc.
+
+
+
