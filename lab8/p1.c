@@ -9,7 +9,7 @@
 #define SEC 1000000000L
 
 int main(int argc, char** argv) {
-	struct timespec t = {2, 0L};
+	struct timespec t = {1, 0.5 * SEC};
 	nanosleep(&t, NULL);
 	int fd = open(argv[1], O_WRONLY);
 
@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
 
 	char message[] = "Hello";
 	int len = 0;
-	struct timespec t2 = {0, 750000000L};
+	struct timespec t2 = {0, 0.75 * SEC};
 
 	for (int i = 0; i <5; i++) {
 		nanosleep(&t2, NULL);

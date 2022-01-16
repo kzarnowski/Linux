@@ -23,17 +23,22 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	int len = 0;
+	int len = -1;
 
 	// read zwroci 0 jak potok bedzie zamkniety
-	// read zwroci EAGAIN or EWOULDBLOCK (man 2 read) kiedy potok jest otwarty ale nic nie wpisuje
+	// read zwroci EAGAIN or EWOULDBLOCK (man 2 read) kiedy potok 
+	// jest otwarty ale nic nie wpisuje
 
-	while (len != -1) {
+	while (len != 0) {
 		len = read(fd, (void*)buffer, sizeof(buffer));
-		if (len != -1) {
+		if (len == EAGAIN || len == EWOULDBLOCK || len == -1) {
+			printf("No messages, waiting...\n");
+		} else if (len == 0) {
+			printf("File closed.\n");
+		} else {
 			printf("%s\n", buffer);
-			nanosleep(&t, NULL);
 		}
+		nanosleep(&t, NULL);
 	}
 	
 	return 0;
