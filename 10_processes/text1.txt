@@ -1,0 +1,7 @@
+Program tworzy 7 potomków, każdy z potomków czeka 1.13s i kończy działanie.
+Rodzic czeka 6.3s i kończy działanie.
+
+Podglądnąć w drugim terminalu jak zachowują się procesy zombie.
+tty - zwraca nazwe terminala
+Następnie:
+watch ps -t nazwa terminalu -o pid,ppid,status
