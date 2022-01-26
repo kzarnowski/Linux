@@ -1,0 +1,26 @@
+Program akceptuje 3 sygnały, user1, user2, sygnal real time najniższy z możliwych (nie mają sensownych nazw). Dla każdego z tych sygnałów, jedna funkcja obsługująca, która musi wiedzieć jaki sygnał obsługuje. W ramach obsługi pobrać czas monotonic i process_cpu_id. Wyniki trzeba trzymać w zmiennej globalnej, kolejka cykliczna (na tablicy). W programie głównym trzeba zablokować sygnał na czas modyfikacji struktury globalnej.
+
+liczniki: sigatomic
+tablica: volatile
+
+Program z oczekiwaniem nanosleep, w pętli sprawdza czy pojawiły się nowe odczyty. Jak się pojawiły to robi printfa (całą kolejkę) na standardowe wyjście. Jak kolejka jest pusta to czekamy 1.5s
+
+
+for zm in {1..4}; do
+	kill -SIGUSR1
+	sleep 0.2
+	kill -SIGUSR2
+	sleep 0.2
+done
+
+
+BLOKOWANIE SYGNAŁÓW NA CZAS POBEIRANIA DANYCH Z KOLEJKI W MAIN:
+sigprockmask, uważać żeby nie zablkować sygnałów które już są zablokowane
+
+
+1) sigprocmask( , NULL, %old)
+2) sigaddset(old, ..).
+...
+..
+3) siprocmask(.., &old, NULL)
+
