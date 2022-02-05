@@ -1,0 +1,20 @@
+Program 1: poszukiwacz
+Program przyjmuje jeden argument: liczbę całkowitą dodatnią z opcjonalnie dodaną jednostką (Ki=1024, Mi=10242). 
+Ponadto wymaga, aby jego standardowe wejście było podpięte do pliku typu potok. 
+(Warunek musi być zweryfikowany na początku działania.)
+
+Argument uruchomienia określa ilość liczb 2-bajtowych, jakie mają być wczytywane ze standardowego wejścia. 
+Dla każdej liczby, która pojawiła się po raz pierwszy, program generuje rekord wyniku, który wysyła na standardowe wyjście. 
+Rekord jest binarny i składa się z dwóch pól: znalezionej liczby i PID tego procesu.
+
+Po zakończeniu przeszukiwania program kończy działanie ze statusem informującym o ilości powtórzeń w danych:
+0 - brak powtórzeń,
+1 - do 10% (włącznie),
+2 - do 20% (włącznie),
+...
+Jeżeli pojawiły się inne błędy (np. niepoprawne wywołanie), to zwracany status ma być większy od 10.
+
+TODO:
+- sprawdzanie argumentów, obsługa jednostki, zamiana na liczbę
+- podpięcie wejścia do potoku (FIFO?)
+- strutkura: zbiór, tablica haszująca?
