@@ -27,11 +27,11 @@ int main(int argc, char **argv)
 {
     struct stat stdin_stats;
     fstat(STDIN_FILENO, &stdin_stats);
-    if (!S_ISFIFO(stdin_stats.st_mode)) // CHECK
-    {
-        fprintf(stderr, "STDIN is not connected to any pipe.\n");
-        exit(15);
-    }
+    // if (!S_ISFIFO(stdin_stats.st_mode)) // CHECK
+    // {
+    //     fprintf(stderr, "STDIN is not connected to any pipe.\n");
+    //     exit(15);
+    // }
 
     if (argc != 2)
     {
@@ -69,13 +69,15 @@ int main(int argc, char **argv)
     num *= multiplier;
 
     /*
-    Uznajemy, ze wczytywane liczby musza byc nieujemne, aby mozna je bylo wykorzystac w drugim programie
-    do indeksacji w pliku sukcesow. Tablica bedzie przechowywac tylko unikalne wartosci, wiec jej rozmiar
-    nie musi byc wiekszy niz najwieksza dodatnia liczba 2-bajtowa - potencjalna oszczednosc pamieci.
+    Uznajemy, ze wczytywane liczby musza byc nieujemne, aby mozna je bylo 
+    wykorzystac w drugim programie do indeksacji w pliku sukcesow. Tablica bedzie 
+    przechowywac tylko unikalne wartosci, wiec jej rozmiar nie musi byc wiekszy
+    niz najwieksza dodatnia liczba 2-bajtowa - potencjalna oszczednosc pamieci.
     */
 
     int len = num < MAX_SHORT ? num : MAX_SHORT;
-    unsigned short **data = (unsigned short **)malloc(len * sizeof(unsigned short *));
+    unsigned short **data = (unsigned short **)malloc(
+        len * sizeof(unsigned short *));
     if (data == NULL)
     {
         perror("Data array memory allocation error.");
@@ -88,17 +90,18 @@ int main(int argc, char **argv)
     }
 
     /*
-    Wykorzystuje tablice haszujaca z podwojnym haszowaniem, rozwiazywanie konfliktow poprzez adresowanie otwarte.
-    Implementacja na podstawie Thomas H. Cormen - "Wprowadzenie do algorytmow, Rozdzial 11"
+    Wykorzystuje tablice haszujaca z podwojnym haszowaniem, rozwiazywanie 
+    konfliktow poprzez adresowanie otwarte. Implementacja na podstawie 
+    Thomas H. Cormen - "Wprowadzenie do algorytmow, Rozdzial 11"
     */
 
     unsigned long int duplicates = 0;
 
-    unsigned short input[10] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+    unsigned short input[10] = {1, 1, 3, 4, 5, 6, 7, 8, 9, 10};
 
     int res = 0;
     RECORD buffer;
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < len; i++)
     {
         res = insert(data, len, input[i]);
         if (res == -1)
@@ -122,6 +125,11 @@ int main(int argc, char **argv)
     }
 
     free_data(data, len);
+
+    int ratio = (int)(((double)duplicates / len) * 100);
+    int result = ratio / 10 + (ratio % 10 != 0);
+
+    return result;
 }
 
 /*
