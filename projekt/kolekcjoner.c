@@ -9,6 +9,8 @@
 #include <signal.h>
 #include <sys/wait.h>
 
+int debug_fd; // DEBUG
+
 #define NANOSEC 1000000000L
 #define FL2NANOSEC(f)                          \
     {                                          \
@@ -21,7 +23,7 @@ typedef struct __attribute__((packed)) record
     pid_t pid;
 } RECORD;
 
-#define DATA_BUFFER_LEN 10000
+#define DATA_BUFFER_SIZE 2000
 #define MAX_USHORT 65535 // 2^16 - 1
 
 // ------------------------------------------------------------------------- //
@@ -29,7 +31,7 @@ typedef struct __attribute__((packed)) record
 char *zrodlo = "./data_12";
 char *sukcesy = "./sukcesy";
 char *raporty = "./raporty";
-unsigned int prac = 10;
+unsigned int prac = 100;
 unsigned long int wolumen = 100000;
 char *blok_str = "100";
 unsigned long int blok = 100;
@@ -37,9 +39,9 @@ unsigned long int blok = 100;
 int parent_to_child[2]; // rodzic wysyla, potomek czyta
 int child_to_parent[2]; // rodzic czyta, potomek wysyla
 
-volatile int death_counter = 0;
-volatile int kids_alive;
-volatile int num_of_successes = 0;
+int death_counter = 0;
+int kids_alive;
+int num_of_successes = 0;
 
 // ------------------------------------------------------------------------- //
 
@@ -54,7 +56,7 @@ int create_first_kids(int raporty_fd);
 void set_nonblock_mode();
 
 void read_data(int zrodlo_fd, unsigned short *data_buffer);
-void send_data(unsigned short *data_buffer);
+int send_data(unsigned short *data_buffer);
 void read_record();
 void save_record(int sukcesy_fd, RECORD *record_buffer);
 
@@ -109,6 +111,7 @@ void child()
 
 void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
 {
+    debug_fd = open("./debug_file", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRWXU); // DEBUG
 
     // close(parent_to_child[0]);
     // close(child_to_parent[1]);
@@ -118,19 +121,23 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     int sleep_res;
     int record_read;      // do odczytania danych od potomkow
     RECORD record_buffer; // do odczytania rekordu od potomka
-    unsigned short data_buffer[DATA_BUFFER_LEN];
+    unsigned short data_buffer[DATA_BUFFER_SIZE];
     const struct timespec t = FL2NANOSEC(0.48);
 
-    read_data(zrodlo_fd, data_buffer);
-    send_data(data_buffer);
-
     int processed = 0;
+    int data_sent;
 
-    while (kids_alive /*data_written || kids_alive*/)
+    while (processed < wolumen * 2 /*data_written || kids_alive*/)
     {
-        if (processed % DATA_BUFFER_LEN == 0)
+        if (processed % DATA_BUFFER_SIZE == 0 && processed / 2 < wolumen)
         {
+            dprintf(debug_fd, "%s", "READ DATA -------------------------\n");
+            read_data(zrodlo_fd, data_buffer);
         }
+
+        data_sent = send_data(data_buffer + (processed % DATA_BUFFER_SIZE) / 2);
+        processed += data_sent;
+        dprintf(debug_fd, "SEND DATA: %d\n", data_sent);
 
         record_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
         if (record_read == sizeof(RECORD))
@@ -318,19 +325,26 @@ void set_nonblock_mode()
 
 void read_data(int zrodlo_fd, unsigned short *data_buffer)
 {
-    int data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
+    int data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_SIZE);
     if (data_read == -1)
     {
         printf("Error reading data from source\n");
+        //TODO: check value from read
     }
 }
 
-void send_data(unsigned short *data_buffer)
+int send_data(unsigned short *data_buffer)
 {
-    int data_written = write(parent_to_child[1], data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
-    if (data_written == -1)
+    int data_sent = write(parent_to_child[1], data_buffer, DATA_BUFFER_SIZE);
+    if (data_sent == -1)
     {
-        printf("Error writing to pipe\n");
+        dprintf(debug_fd, "%s\n", "Pipe full");
+        //TODO: check value from write
+        return 0;
+    }
+    else
+    {
+        return data_sent;
     }
 }
 
