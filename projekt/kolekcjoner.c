@@ -146,7 +146,7 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     // close(parent_to_child[0]);
     // close(child_to_parent[1]);
 
-    //const struct timespec t = FL2NANOSEC(0.48);
+    const struct timespec t = FL2NANOSEC(0.48);
 
     // zmiana na tryb nieblokujacy
     fcntl(parent_to_child[1], F_SETFL, fcntl(parent_to_child[1], F_GETFL) | O_NONBLOCK); //TODO: add error checking
@@ -154,7 +154,7 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
 
     unsigned short data_buffer[DATA_BUFFER_LEN];
 
-    //int sleep_res;
+    int sleep_res;
     int slot_read;        // do odczytania komorki z pliku sukcesy
     int data_read;        // do odczytania danych z pliku zrodlo
     int data_written;     // do zapisu danych z data_buffer do pipe'a
@@ -215,13 +215,14 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
                 num_of_successes++; // aktualizowanie zapelnienia pliku sukcesy
             }
         }
-        // if (handle_deaths() == -1)
-        // {
-        //     sleep_res = clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &t, NULL);
-        //     if (sleep_res == -1) {
-        //          perror("Nanosleep error.");
-        //     }
-        // }
+        if (handle_deaths(raporty_fd) == -1)
+        {
+            sleep_res = clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &t, NULL);
+            if (sleep_res == -1)
+            {
+                perror("Nanosleep error.");
+            }
+        }
     }
 
     printf("DEATH COUNTER: %d\n", death_counter);      // DEBUG
@@ -289,6 +290,16 @@ int handle_deaths(int raporty_fd)
                 else if (fork_result == 0)
                 {
                     child();
+                }
+                else
+                {
+                    clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
+                    if (clock_res == -1)
+                    {
+                        perror("Error while reading a clock.");
+                        exit(1);
+                    }
+                    write_report(raporty_fd, pid, "born", &t);
                 }
             }
         }
