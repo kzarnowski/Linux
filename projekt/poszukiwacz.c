@@ -136,8 +136,13 @@ int main(int argc, char **argv)
     free_data(data, len);
 
     // obliczenie statusu zakonczenia
-    int ratio = (int)(((double)duplicates / len) * 100);
-    int result = ratio / 10 + (ratio % 10 != 0);
+    int ratio = (int)(((double)duplicates / len) * 1000); // ex. ratio 100 == 10%
+    int result = ratio / 100;
+
+    if (ratio % 100 > 0)
+    {
+        result++;
+    }
 
     fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups); // DEBUG
     return result;

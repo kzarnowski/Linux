@@ -30,14 +30,15 @@ char *sukcesy = "./sukcesy";
 char *raporty = "./raporty";
 unsigned int prac = 10;
 unsigned long int wolumen = 100000;
-char *blok_str = "1000";
-unsigned long int blok = 1000;
+char *blok_str = "100";
+unsigned long int blok = 100;
 
 int parent_to_child[2]; // rodzic wysyla, potomek czyta
 int child_to_parent[2]; // rodzic czyta, potomek wysyla
 
 volatile int death_counter = 0;
 volatile int kids_alive;
+volatile int num_of_successes = 0;
 
 // ------------------------------------------------------------------------- //
 
@@ -121,11 +122,14 @@ void parent()
 
     unsigned short data_buffer[DATA_BUFFER_LEN];
 
-    int data_read;
-    int data_written;
-    int segment_read = 1;
-    int segment_written;
-    RECORD record_buffer;
+    int slot_read;        // do odczytania komorki z pliku sukcesy
+    int data_read;        // do odczytania danych z pliku zrodlo
+    int data_written;     // do zapisu danych z data_buffer do pipe'a
+    int segment_read = 1; // do odczytania danych od potomkow
+    int segment_written;  // do zapisania rekordu w pliku sukcesy
+    RECORD record_buffer; // do odczytania rekordu od potomka
+    pid_t pid_buffer;     // do odczytania pidu z komorki pliku sukcesy
+    off_t index;          // do przechodzenia po pliku
 
     data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
     if (data_read == -1)
@@ -138,30 +142,47 @@ void parent()
         printf("Error writing to pipe\n");
     }
 
-    int i = 0;
     while (kids_alive /*data_written || kids_alive*/)
     {
         segment_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
         if (segment_read == sizeof(RECORD))
         {
             //printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x); // DEBUG
-            off_t index = lseek(sukcesy_fd, record_buffer.x * sizeof(pid_t), SEEK_SET);
+            // przesuniecie na odpowiedni indeks
+            index = lseek(sukcesy_fd, record_buffer.x * sizeof(pid_t), SEEK_SET);
             if (index == -1)
             {
                 perror("lseek error");
                 exit(1);
             }
-            segment_written = write(sukcesy_fd, &record_buffer.pid, sizeof(pid_t));
-            if (segment_written == -1)
+
+            /*
+            Sprawdzenie czy komorka jest pusta - jesli tak, cofniecie sie na jej
+            poczatek i wpisanie pid. Jesli nie, nic nie wpisujemy.
+            */
+            slot_read = read(sukcesy_fd, &pid_buffer, sizeof(pid_t));
+            if (slot_read == -1)
             {
-                perror("sukcesy writing error");
+                perror("slot_read error");
                 exit(1);
             }
+            if (pid_buffer == 0)
+            {
+                // komorka jest pusta
+                index = lseek(sukcesy_fd, -1 * sizeof(pid_t), SEEK_CUR);
+                segment_written = write(sukcesy_fd, &record_buffer.pid, sizeof(pid_t));
+                if (segment_written == -1)
+                {
+                    perror("sukcesy writing error");
+                    exit(1);
+                }
+                num_of_successes++; // aktualizowanie zapelnienia pliku sukcesy
+            }
         }
-        i++;
     }
 
-    printf("DEATH COUNTER: %d\n", death_counter); // DEBUG
+    printf("DEATH COUNTER: %d\n", death_counter);      // DEBUG
+    printf("TOTAL SUCCESSES: %d\n", num_of_successes); // DEBUG
 }
 
 void signal_register(int signum, void *func, struct sigaction *sa)
@@ -185,6 +206,10 @@ void handle_deaths(int signo, siginfo_t *SI, void *data)
     {
         kids_alive--;
         death_counter++;
-        printf("child %u terminated.\n", (unsigned)pid);
+
+        if (WIFEXITED(status))
+        {
+            printf("child %u terminated, status: %d\n", (unsigned)pid, WEXITSTATUS(status)); //DEBUG
+        }
     }
 }
