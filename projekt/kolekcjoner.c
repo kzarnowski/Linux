@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <time.h>
+#include <signal.h>
+#include <sys/wait.h>
 
 #define NANOSEC 1000000000L
 #define FL2NANOSEC(f)                          \
@@ -23,10 +25,10 @@ typedef struct __attribute__((packed)) record
 
 // ------------------------------------------------------------------------- //
 
-char *zrodlo = "./data";
+char *zrodlo = "./data_3";
 char *sukcesy = "./sukcesy";
 char *raporty = "./raporty";
-unsigned int prac = 10;
+unsigned int prac = 1;
 unsigned long int wolumen = 10000;
 char *blok_str = "100";
 unsigned long int blok = 100;
@@ -34,10 +36,15 @@ unsigned long int blok = 100;
 int parent_to_child[2]; // rodzic wysyla, potomek czyta
 int child_to_parent[2]; // rodzic czyta, potomek wysyla
 
+volatile int death_counter = 0;
+volatile int kids_alive;
+
 // ------------------------------------------------------------------------- //
 
 void child();
 void parent();
+void signal_register(int signum, void *func, struct sigaction *sa);
+void handle_deaths();
 
 // ------------------------------------------------------------------------- //
 
@@ -48,6 +55,8 @@ int main(int argc, char **argv)
         perror("Creating pipe error.\n");
         exit(2);
     }
+
+    kids_alive = prac; // ustaw licznik potomkow
 
     int pid;
     for (int i = 0; i < prac /*childs_num*/; i++)
@@ -67,12 +76,10 @@ int main(int argc, char **argv)
 
     if (pid == 0)
     {
-        printf("CHILD FUNC\n");
         child();
     }
     else
     {
-        printf("PARENT FUNC\n");
         parent();
     }
 }
@@ -96,6 +103,9 @@ void child()
 
 void parent()
 {
+    struct sigaction sa;
+    signal_register(SIGCHLD, handle_deaths, &sa);
+
     close(parent_to_child[0]);
     close(child_to_parent[1]);
 
@@ -115,7 +125,6 @@ void parent()
     int data_written;
     int segment_read = 1;
     int segment_written;
-    //int kids_alive = prac;
     RECORD record_buffer;
 
     data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
@@ -129,13 +138,14 @@ void parent()
         printf("Error writing to pipe\n");
     }
 
-    nanosleep(&t, NULL); // TEST PURPOSE
-    while (segment_read != 0 /*data_written || kids_alive*/)
+    nanosleep(&t, NULL); // DEBUG
+    int i = 0;
+    while (kids_alive /*data_written || kids_alive*/)
     {
         segment_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
         if (segment_read == sizeof(RECORD))
         {
-            printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x);
+            printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x); // DEBUG
             off_t index = lseek(sukcesy_fd, record_buffer.x * sizeof(pid_t), SEEK_SET);
             if (index == -1)
             {
@@ -149,5 +159,33 @@ void parent()
                 exit(1);
             }
         }
+        i++;
+    }
+
+    printf("DEATH COUNTER: %d\n", death_counter); // DEBUG
+}
+
+void signal_register(int signum, void *func, struct sigaction *sa)
+{
+    sa->sa_sigaction = func;
+    sigemptyset(&sa->sa_mask);
+    sa->sa_flags = SA_SIGINFO | SA_NOCLDSTOP;
+
+    if (sigaction(signum, sa, NULL) == -1)
+    {
+        perror("Sigaction error.");
+        exit(1);
+    }
+}
+
+void handle_deaths(int signo, siginfo_t *SI, void *data)
+{
+    int status;
+    pid_t pid;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+    {
+        kids_alive--;
+        death_counter++;
+        printf("child %u terminated.\n", (unsigned)pid);
     }
 }
