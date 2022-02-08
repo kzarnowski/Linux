@@ -49,6 +49,9 @@ void signal_register(int signum, void *func, struct sigaction *sa);
 void write_report(int raporty_fd, int pid, char *note, struct timespec *t);
 void initialize_report_headers(int raporty_fd);
 int handle_deaths(int raporty_fd);
+void open_files(int *zrodlo_fd, int *sukcesy_fd, int *raporty_fd);
+int create_first_kids(int raporty_fd);
+void set_nonblock_mode();
 
 // ------------------------------------------------------------------------- //
 
@@ -61,62 +64,20 @@ int main(int argc, char **argv)
     }
 
     kids_alive = prac; // ustaw licznik potomkow
-    struct timespec t;
-    int clock_res;
 
-    int zrodlo_fd = open(zrodlo, O_RDONLY);
-    if (zrodlo_fd == -1)
-    {
-        perror("Error while opening file: zrodlo");
-        exit(1);
-    }
-    int sukcesy_fd = open(sukcesy, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU);
-    if (sukcesy_fd == -1)
-    {
-        perror("Error while opening file: sukcesy");
-        exit(1);
-    }
-    int raporty_fd = open(raporty, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRWXU);
-    if (raporty_fd == -1)
-    {
-        perror("Error while opening file: raporty");
-        exit(1);
-    }
+    int zrodlo_fd, sukcesy_fd, raporty_fd;
+    open_files(&zrodlo_fd, &sukcesy_fd, &raporty_fd);
     initialize_report_headers(raporty_fd);
 
-    int pid;
-    for (int i = 0; i < prac /*childs_num*/; i++)
-    {
-        pid = fork();
+    int is_parent = create_first_kids(raporty_fd);
 
-        if (pid == -1)
-        {
-            perror("Creating a child error.");
-            exit(2);
-        }
-        else if (pid == 0)
-        {
-            break;
-        }
-        else
-        {
-            clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
-            if (clock_res == -1)
-            {
-                perror("Error while reading a clock.");
-                exit(1);
-            }
-            write_report(raporty_fd, pid, "born", &t);
-        }
-    }
-
-    if (pid == 0)
+    if (is_parent)
     {
-        child();
+        parent(zrodlo_fd, sukcesy_fd, raporty_fd);
     }
     else
     {
-        parent(zrodlo_fd, sukcesy_fd, raporty_fd);
+        child();
     }
 }
 
@@ -133,26 +94,21 @@ void child()
     close(child_to_parent[1]);
 
     char *args[] = {"./poszukiwacz", blok_str, NULL};
-    execvp(args[0], args);
-
-    printf("EXEC error\n");
+    int exec_res = execvp(args[0], args);
+    if (exec_res == -1)
+    {
+        perror("Error while executing ./poszukiwacz");
+        exit(1);
+    }
 }
 
 void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
 {
-    // struct sigaction sa;
-    // signal_register(SIGCHLD, handle_deaths, &sa);
 
     // close(parent_to_child[0]);
     // close(child_to_parent[1]);
 
-    const struct timespec t = FL2NANOSEC(0.48);
-
-    // zmiana na tryb nieblokujacy
-    fcntl(parent_to_child[1], F_SETFL, fcntl(parent_to_child[1], F_GETFL) | O_NONBLOCK); //TODO: add error checking
-    fcntl(child_to_parent[0], F_SETFL, fcntl(child_to_parent[0], F_GETFL) | O_NONBLOCK); //TODO: add error checking
-
-    unsigned short data_buffer[DATA_BUFFER_LEN];
+    set_nonblock_mode();
 
     int sleep_res;
     int slot_read;        // do odczytania komorki z pliku sukcesy
@@ -163,6 +119,8 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     RECORD record_buffer; // do odczytania rekordu od potomka
     pid_t pid_buffer;     // do odczytania pidu z komorki pliku sukcesy
     off_t index;          // do przechodzenia po pliku
+    unsigned short data_buffer[DATA_BUFFER_LEN];
+    const struct timespec t = FL2NANOSEC(0.48);
 
     data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
     if (data_read == -1)
@@ -229,19 +187,6 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     printf("TOTAL SUCCESSES: %d\n", num_of_successes); // DEBUG
 }
 
-void signal_register(int signum, void *func, struct sigaction *sa)
-{
-    sa->sa_sigaction = func;
-    sigemptyset(&sa->sa_mask);
-    sa->sa_flags = SA_SIGINFO | SA_NOCLDSTOP;
-
-    if (sigaction(signum, sa, NULL) == -1)
-    {
-        perror("Sigaction error.");
-        exit(1);
-    }
-}
-
 int handle_deaths(int raporty_fd)
 {
     // Funkcja zwraca liczbe zarejestrowanych smierci lub -1 jesli nikt nie zginal.
@@ -260,14 +205,11 @@ int handle_deaths(int raporty_fd)
     int clock_res;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
     {
-
-        kids_alive--;
-        death_counter++;
-
         result = result != -1 ? result + 1 : 1;
 
         if (WIFEXITED(status))
         {
+            kids_alive--;
             clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
             if (clock_res == -1)
             {
@@ -276,11 +218,9 @@ int handle_deaths(int raporty_fd)
             }
             write_report(raporty_fd, pid, "dead", &t);
 
-            // printf("child %u terminated, status: %d\n", (unsigned)pid, WEXITSTATUS(status)); //DEBUG
             return_value = WEXITSTATUS(status);
             if (return_value <= 10 && filled_slots < 0.75)
             {
-                kids_alive++;
                 fork_result = fork();
                 if (fork_result == -1)
                 {
@@ -293,6 +233,7 @@ int handle_deaths(int raporty_fd)
                 }
                 else
                 {
+                    kids_alive++;
                     clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
                     if (clock_res == -1)
                     {
@@ -325,6 +266,88 @@ void write_report(int raporty_fd, int pid, char *note, struct timespec *t)
     if (res < 0)
     {
         perror("Error while writing report.");
+        exit(1);
+    }
+}
+
+void open_files(int *zrodlo_fd, int *sukcesy_fd, int *raporty_fd)
+{
+    *zrodlo_fd = open(zrodlo, O_RDONLY);
+    if (*zrodlo_fd == -1)
+    {
+        perror("Error while opening file: zrodlo");
+        exit(1);
+    }
+
+    *sukcesy_fd = open(sukcesy, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU);
+    if (*sukcesy_fd == -1)
+    {
+        perror("Error while opening file: sukcesy");
+        exit(1);
+    }
+
+    *raporty_fd = open(raporty, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRWXU);
+    if (*raporty_fd == -1)
+    {
+        perror("Error while opening file: raporty");
+        exit(1);
+    }
+}
+
+int create_first_kids(int raporty_fd)
+{
+    struct timespec t;
+    int clock_res;
+    int pid;
+    for (int i = 0; i < prac; i++)
+    {
+        pid = fork();
+
+        if (pid == -1)
+        {
+            perror("Creating a child error.");
+            exit(2);
+        }
+        else if (pid == 0)
+        {
+            break;
+        }
+        else
+        {
+            clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
+            if (clock_res == -1)
+            {
+                perror("Error while reading a clock.");
+                exit(1);
+            }
+            write_report(raporty_fd, pid, "born", &t);
+        }
+    }
+
+    if (pid == 0)
+    {
+        return 0; // Jestem potomkiem
+    }
+    else
+    {
+        return 1; // Jestem rodzicem
+    }
+}
+
+void set_nonblock_mode()
+{
+    int nonblock_res = fcntl(parent_to_child[1], F_SETFL,
+                             fcntl(parent_to_child[1], F_GETFL) | O_NONBLOCK);
+    if (nonblock_res == -1)
+    {
+        perror("Error while setting nonblock mode.");
+        exit(1);
+    }
+    nonblock_res = fcntl(child_to_parent[0], F_SETFL,
+                         fcntl(child_to_parent[0], F_GETFL) | O_NONBLOCK);
+    if (nonblock_res == -1)
+    {
+        perror("Error while setting nonblock mode.");
         exit(1);
     }
 }
