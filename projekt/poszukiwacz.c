@@ -46,7 +46,7 @@ int main(int argc, char **argv)
     char *end = NULL;
     long int blok = strtol((const char *)(argv[1]), &end, 10);
 
-    fprintf(stderr, "BLOK STRTOL: %ld\n", blok); // DEBUG
+    // fprintf(stderr, "BLOK STRTOL: %ld\n", blok); // DEBUG
     // uwzglednienie jednostki argumentu <blok>
     int multiplier = 1;
     if (end != NULL)
@@ -82,7 +82,7 @@ int main(int argc, char **argv)
         exit(13);
     }
 
-    fprintf(stderr, "LEN: %d\n", len); // DEBUG
+    // fprintf(stderr, "LEN: %d\n", len); // DEBUG
 
     // inicjalizacja tablicy
     for (int i = 0; i < len; i++)
@@ -107,6 +107,8 @@ int main(int argc, char **argv)
 
     for (int i = 0; i < blok; i++)
     {
+        // if (i % 100 == 0 || i > 32700)  // DEBUG
+        //     fprintf(stderr, "%d\n", i); // DEBUG
         res = read(STDIN_FILENO, &temp_x, sizeof(unsigned short));
         if (res == -1)
         {
@@ -137,18 +139,16 @@ int main(int argc, char **argv)
     int ratio = (int)(((double)duplicates / len) * 100);
     int result = ratio / 10 + (ratio % 10 != 0);
 
-    fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups);
+    fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups); // DEBUG
     return result;
 }
 
 unsigned short hash(unsigned short k, int i, int len)
 {
-    unsigned short h1 = k % len;
-    unsigned short h2 = 1 + (k % (len - 1));
-    return (h1 + i * h2) % len;
+    return (k + i) % len;
 }
 
-int insert2(unsigned short **data, int len, unsigned short k)
+int insert(unsigned short **data, int len, unsigned short k)
 {
     int i = 0;
     int j = 0;
@@ -196,48 +196,4 @@ void free_data(unsigned short **data, int len)
         free(data[i]);
     }
     free(data);
-}
-
-int insert(unsigned short **data, int len, unsigned short k)
-{
-    int i = 0;
-    int j = k % len;
-    while (data[j] != NULL && *data[j] != k)
-    {
-        j = (j + 1) % len;
-        i++;
-
-        if (i == len)
-        {
-            fprintf(stderr, "Hash table overflow.\n");
-            fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups);
-            free_data(data, len);
-            exit(14);
-        }
-    }
-
-    if (data[j] == NULL)
-    {
-        // nowy, unikalny element
-        data[j] = (unsigned short *)malloc(sizeof(unsigned short));
-        if (data[j] == NULL)
-        {
-            fprintf(stderr, "Hash table malloc error.\n");
-            exit(14);
-        }
-        *data[j] = k;
-        return 0;
-    }
-    else if (*data[j] == k)
-    {
-        // duplikat
-        return -1;
-    }
-    else
-    {
-        fprintf(stderr, "Hash table overflow.\n");
-        fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups);
-        free_data(data, len);
-        exit(14);
-    }
 }

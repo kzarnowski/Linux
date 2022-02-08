@@ -21,17 +21,17 @@ typedef struct __attribute__((packed)) record
     pid_t pid;
 } RECORD;
 
-#define DATA_BUFFER_LEN 1000
+#define DATA_BUFFER_LEN 10000
 
 // ------------------------------------------------------------------------- //
 
-char *zrodlo = "./data_3";
+char *zrodlo = "./data_12";
 char *sukcesy = "./sukcesy";
 char *raporty = "./raporty";
-unsigned int prac = 1;
-unsigned long int wolumen = 10000;
-char *blok_str = "100";
-unsigned long int blok = 100;
+unsigned int prac = 10;
+unsigned long int wolumen = 100000;
+char *blok_str = "1000";
+unsigned long int blok = 1000;
 
 int parent_to_child[2]; // rodzic wysyla, potomek czyta
 int child_to_parent[2]; // rodzic czyta, potomek wysyla
@@ -109,7 +109,7 @@ void parent()
     close(parent_to_child[0]);
     close(child_to_parent[1]);
 
-    const struct timespec t = FL2NANOSEC(0.48);
+    //const struct timespec t = FL2NANOSEC(0.48);
 
     // zmiana na tryb nieblokujacy
     fcntl(parent_to_child[1], F_SETFL, fcntl(parent_to_child[1], F_GETFL) | O_NONBLOCK); //TODO: add error checking
@@ -138,14 +138,13 @@ void parent()
         printf("Error writing to pipe\n");
     }
 
-    nanosleep(&t, NULL); // DEBUG
     int i = 0;
     while (kids_alive /*data_written || kids_alive*/)
     {
         segment_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
         if (segment_read == sizeof(RECORD))
         {
-            printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x); // DEBUG
+            //printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x); // DEBUG
             off_t index = lseek(sukcesy_fd, record_buffer.x * sizeof(pid_t), SEEK_SET);
             if (index == -1)
             {
