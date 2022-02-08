@@ -53,6 +53,11 @@ void open_files(int *zrodlo_fd, int *sukcesy_fd, int *raporty_fd);
 int create_first_kids(int raporty_fd);
 void set_nonblock_mode();
 
+void read_data(int zrodlo_fd, unsigned short *data_buffer);
+void send_data(unsigned short *data_buffer);
+void read_record();
+void save_record(int sukcesy_fd, RECORD *record_buffer);
+
 // ------------------------------------------------------------------------- //
 
 int main(int argc, char **argv)
@@ -111,67 +116,26 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     set_nonblock_mode();
 
     int sleep_res;
-    int slot_read;        // do odczytania komorki z pliku sukcesy
-    int data_read;        // do odczytania danych z pliku zrodlo
-    int data_written;     // do zapisu danych z data_buffer do pipe'a
-    int segment_read = 1; // do odczytania danych od potomkow
-    int segment_written;  // do zapisania rekordu w pliku sukcesy
+    int record_read;      // do odczytania danych od potomkow
     RECORD record_buffer; // do odczytania rekordu od potomka
-    pid_t pid_buffer;     // do odczytania pidu z komorki pliku sukcesy
-    off_t index;          // do przechodzenia po pliku
     unsigned short data_buffer[DATA_BUFFER_LEN];
     const struct timespec t = FL2NANOSEC(0.48);
 
-    data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
-    if (data_read == -1)
-    {
-        printf("Data has ended\n");
-    }
-    data_written = write(parent_to_child[1], data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
-    if (data_written == -1)
-    {
-        printf("Error writing to pipe\n");
-    }
+    read_data(zrodlo_fd, data_buffer);
+    send_data(data_buffer);
+
+    int processed = 0;
 
     while (kids_alive /*data_written || kids_alive*/)
     {
-        segment_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
-        if (segment_read == sizeof(RECORD))
+        if (processed % DATA_BUFFER_LEN == 0)
         {
-            //printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x); // DEBUG
-            // przesuniecie na odpowiedni indeks
-            index = lseek(sukcesy_fd, record_buffer.x * sizeof(pid_t), SEEK_SET);
-            if (index == -1)
-            {
-                perror("lseek error");
-                exit(1);
-            }
+        }
 
-            /*
-            Sprawdzenie czy komorka jest pusta - jesli tak, cofniecie sie na jej
-            poczatek i wpisanie pid. Jesli nie, nic nie wpisujemy.
-            */
-            // if (res == -1) {
-            //     perror("Nanosleep error.");
-            // }
-            slot_read = read(sukcesy_fd, &pid_buffer, sizeof(pid_t));
-            if (slot_read == -1)
-            {
-                perror("slot_read error");
-                exit(1);
-            }
-            if (pid_buffer == 0)
-            {
-                // komorka jest pusta
-                index = lseek(sukcesy_fd, -1 * sizeof(pid_t), SEEK_CUR);
-                segment_written = write(sukcesy_fd, &record_buffer.pid, sizeof(pid_t));
-                if (segment_written == -1)
-                {
-                    perror("sukcesy writing error");
-                    exit(1);
-                }
-                num_of_successes++; // aktualizowanie zapelnienia pliku sukcesy
-            }
+        record_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
+        if (record_read == sizeof(RECORD))
+        {
+            save_record(sukcesy_fd, &record_buffer);
         }
         if (handle_deaths(raporty_fd) == -1)
         {
@@ -349,5 +313,65 @@ void set_nonblock_mode()
     {
         perror("Error while setting nonblock mode.");
         exit(1);
+    }
+}
+
+void read_data(int zrodlo_fd, unsigned short *data_buffer)
+{
+    int data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
+    if (data_read == -1)
+    {
+        printf("Error reading data from source\n");
+    }
+}
+
+void send_data(unsigned short *data_buffer)
+{
+    int data_written = write(parent_to_child[1], data_buffer, DATA_BUFFER_LEN * sizeof(unsigned short));
+    if (data_written == -1)
+    {
+        printf("Error writing to pipe\n");
+    }
+}
+
+void read_record()
+{
+}
+
+void save_record(int sukcesy_fd, RECORD *record_buffer)
+{
+    pid_t pid_buffer;
+    int record_written;
+    //printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x); // DEBUG
+    // przesuniecie na odpowiedni indeks
+    off_t index = lseek(sukcesy_fd, record_buffer->x * sizeof(pid_t), SEEK_SET);
+    if (index == -1)
+    {
+        perror("lseek error");
+        exit(1);
+    }
+
+    /*
+            Sprawdzenie czy komorka jest pusta - jesli tak, cofniecie sie na jej
+            poczatek i wpisanie pid. Jesli nie, nic nie wpisujemy.
+            */
+
+    int slot_read = read(sukcesy_fd, &pid_buffer, sizeof(pid_t));
+    if (slot_read == -1)
+    {
+        perror("slot_read error");
+        exit(1);
+    }
+    if (pid_buffer == 0)
+    {
+        // komorka jest pusta
+        index = lseek(sukcesy_fd, -1 * sizeof(pid_t), SEEK_CUR);
+        record_written = write(sukcesy_fd, &record_buffer->pid, sizeof(pid_t));
+        if (record_written == -1)
+        {
+            perror("sukcesy writing error");
+            exit(1);
+        }
+        num_of_successes++; // aktualizowanie zapelnienia pliku sukcesy
     }
 }
