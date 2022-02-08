@@ -22,6 +22,7 @@ typedef struct __attribute__((packed)) record
 } RECORD;
 
 #define DATA_BUFFER_LEN 10000
+#define MAX_USHORT 65535 // 2^16 - 1
 
 // ------------------------------------------------------------------------- //
 
@@ -43,9 +44,11 @@ volatile int num_of_successes = 0;
 // ------------------------------------------------------------------------- //
 
 void child();
-void parent();
+void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd);
 void signal_register(int signum, void *func, struct sigaction *sa);
-void handle_deaths();
+void write_report(int raporty_fd, int pid, char *note, struct timespec *t);
+void initialize_report_headers(int raporty_fd);
+int handle_deaths(int raporty_fd);
 
 // ------------------------------------------------------------------------- //
 
@@ -58,6 +61,28 @@ int main(int argc, char **argv)
     }
 
     kids_alive = prac; // ustaw licznik potomkow
+    struct timespec t;
+    int clock_res;
+
+    int zrodlo_fd = open(zrodlo, O_RDONLY);
+    if (zrodlo_fd == -1)
+    {
+        perror("Error while opening file: zrodlo");
+        exit(1);
+    }
+    int sukcesy_fd = open(sukcesy, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU);
+    if (sukcesy_fd == -1)
+    {
+        perror("Error while opening file: sukcesy");
+        exit(1);
+    }
+    int raporty_fd = open(raporty, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRWXU);
+    if (raporty_fd == -1)
+    {
+        perror("Error while opening file: raporty");
+        exit(1);
+    }
+    initialize_report_headers(raporty_fd);
 
     int pid;
     for (int i = 0; i < prac /*childs_num*/; i++)
@@ -73,6 +98,16 @@ int main(int argc, char **argv)
         {
             break;
         }
+        else
+        {
+            clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
+            if (clock_res == -1)
+            {
+                perror("Error while reading a clock.");
+                exit(1);
+            }
+            write_report(raporty_fd, pid, "born", &t);
+        }
     }
 
     if (pid == 0)
@@ -81,12 +116,13 @@ int main(int argc, char **argv)
     }
     else
     {
-        parent();
+        parent(zrodlo_fd, sukcesy_fd, raporty_fd);
     }
 }
 
 void child()
 {
+
     close(parent_to_child[1]);
     close(child_to_parent[0]);
     // write: child_to_parent, read: parent_to_child
@@ -102,13 +138,13 @@ void child()
     printf("EXEC error\n");
 }
 
-void parent()
+void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
 {
-    struct sigaction sa;
-    signal_register(SIGCHLD, handle_deaths, &sa);
+    // struct sigaction sa;
+    // signal_register(SIGCHLD, handle_deaths, &sa);
 
-    close(parent_to_child[0]);
-    close(child_to_parent[1]);
+    // close(parent_to_child[0]);
+    // close(child_to_parent[1]);
 
     //const struct timespec t = FL2NANOSEC(0.48);
 
@@ -116,12 +152,9 @@ void parent()
     fcntl(parent_to_child[1], F_SETFL, fcntl(parent_to_child[1], F_GETFL) | O_NONBLOCK); //TODO: add error checking
     fcntl(child_to_parent[0], F_SETFL, fcntl(child_to_parent[0], F_GETFL) | O_NONBLOCK); //TODO: add error checking
 
-    int zrodlo_fd = open(zrodlo, O_RDONLY);
-    int sukcesy_fd = open(sukcesy, O_RDWR | O_CREAT | O_TRUNC, S_IRWXU);
-    //int raporty_fd = open(raporty, O_RDWR | O_CREAT | O_TRUNC,  S_IRWXU);
-
     unsigned short data_buffer[DATA_BUFFER_LEN];
 
+    //int sleep_res;
     int slot_read;        // do odczytania komorki z pliku sukcesy
     int data_read;        // do odczytania danych z pliku zrodlo
     int data_written;     // do zapisu danych z data_buffer do pipe'a
@@ -160,6 +193,9 @@ void parent()
             Sprawdzenie czy komorka jest pusta - jesli tak, cofniecie sie na jej
             poczatek i wpisanie pid. Jesli nie, nic nie wpisujemy.
             */
+            // if (res == -1) {
+            //     perror("Nanosleep error.");
+            // }
             slot_read = read(sukcesy_fd, &pid_buffer, sizeof(pid_t));
             if (slot_read == -1)
             {
@@ -179,6 +215,13 @@ void parent()
                 num_of_successes++; // aktualizowanie zapelnienia pliku sukcesy
             }
         }
+        // if (handle_deaths() == -1)
+        // {
+        //     sleep_res = clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &t, NULL);
+        //     if (sleep_res == -1) {
+        //          perror("Nanosleep error.");
+        //     }
+        // }
     }
 
     printf("DEATH COUNTER: %d\n", death_counter);      // DEBUG
@@ -198,18 +241,79 @@ void signal_register(int signum, void *func, struct sigaction *sa)
     }
 }
 
-void handle_deaths(int signo, siginfo_t *SI, void *data)
+int handle_deaths(int raporty_fd)
 {
+    // Funkcja zwraca liczbe zarejestrowanych smierci lub -1 jesli nikt nie zginal.
+    int result = -1;
     int status;
+    int return_value;
+    /* 
+    maksymalna liczba komorek w pliku to najwieksza dodatnia liczba 2-bajtowa,
+    poniewaz takimi liczbami sa indeksy na ktorych wpisujemy pidy
+    zajetosc pliku obliczamy jako stosunek dotychczasowych sukcesow do tej liczby
+    */
+    double filled_slots = ((double)num_of_successes) / MAX_USHORT;
     pid_t pid;
+    int fork_result;
+    struct timespec t;
+    int clock_res;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
     {
+
         kids_alive--;
         death_counter++;
 
+        result = result != -1 ? result + 1 : 1;
+
         if (WIFEXITED(status))
         {
-            printf("child %u terminated, status: %d\n", (unsigned)pid, WEXITSTATUS(status)); //DEBUG
+            clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
+            if (clock_res == -1)
+            {
+                perror("Error while reading a clock.");
+                exit(1);
+            }
+            write_report(raporty_fd, pid, "dead", &t);
+
+            // printf("child %u terminated, status: %d\n", (unsigned)pid, WEXITSTATUS(status)); //DEBUG
+            return_value = WEXITSTATUS(status);
+            if (return_value <= 10 && filled_slots < 0.75)
+            {
+                kids_alive++;
+                fork_result = fork();
+                if (fork_result == -1)
+                {
+                    perror("Fork in signal handler error.");
+                    exit(1);
+                }
+                else if (fork_result == 0)
+                {
+                    child();
+                }
+            }
         }
+    }
+    return result;
+}
+
+void initialize_report_headers(int raporty_fd)
+{
+    char *format = "%5s %4s %17s\n";
+    int res = dprintf(raporty_fd, format, "PID", "INFO", "CLOCK MONOTONIC");
+    if (res < 0)
+    {
+        perror("Error while writing report.");
+        exit(1);
+    }
+}
+
+void write_report(int raporty_fd, int pid, char *note, struct timespec *t)
+{
+    char *format = "%5d %4s %7ld.%-9ld\n";
+    int res = dprintf(raporty_fd, format, pid, note, t->tv_sec, t->tv_nsec);
+    if (res < 0)
+    {
+        perror("Error while writing report.");
+        exit(1);
     }
 }
