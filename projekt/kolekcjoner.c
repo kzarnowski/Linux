@@ -61,9 +61,9 @@ int read_args(int argc, char **argv);
 void initialize_zeros(int sukcesy_fd);
 unsigned long int calculate_unit(unsigned long int x, char *end);
 
-int read_data(int zrodlo_fd, unsigned short *data_buffer);
+int read_data(int zrodlo_fd, unsigned short *data_buffer, long int total_read);
 //int send_data(unsigned short *data_buffer, long int processed, int data_read);
-int send_data(unsigned short *data_buffer, long int processed, long int total_read);
+int send_data(unsigned short *data_buffer, long int processed);
 void read_record();
 void save_record(int sukcesy_fd, RECORD *record_buffer);
 
@@ -153,15 +153,16 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
         // Wczytywanie nowej porcji danych, kiedy caly data_buffer zostal wyslany
         if (processed % DATA_BUFFER_SIZE == 0 && /*processed < wolumen * 2*/ total_read < 2 * wolumen)
         {
-            data_read = read_data(zrodlo_fd, data_buffer);
+            data_read = read_data(zrodlo_fd, data_buffer, total_read);
             total_read += data_read;
             printf("TOTAL READ: %ld, DATA READ: %d\n", total_read, data_read);
         }
 
         if (processed < 2 * wolumen)
         {
-            data_sent = send_data(data_buffer + (processed % DATA_BUFFER_SIZE) / 2, processed, total_read);
+            data_sent = send_data(data_buffer + (processed % DATA_BUFFER_SIZE) / 2, processed);
             processed += data_sent;
+            printf("TOTAL SENT: %ld, DATA SENT: %d\n", processed, data_sent);
         }
         else if (pipe_open == 1)
         {
@@ -385,9 +386,15 @@ void set_nonblock_mode()
     }
 }
 
-int read_data(int zrodlo_fd, unsigned short *data_buffer)
+int read_data(int zrodlo_fd, unsigned short *data_buffer, long int total_read)
 {
-    int data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_SIZE);
+    int data_to_read = DATA_BUFFER_SIZE;
+    if (wolumen * 2 - total_read < DATA_BUFFER_SIZE)
+    {
+        // w ostatnim pakiecie czytamy mniej
+        data_to_read = wolumen * 2 - total_read;
+    }
+    int data_read = read(zrodlo_fd, data_buffer, data_to_read);
     if (data_read == -1)
     {
         perror("Error reading data from source\n");
@@ -396,11 +403,16 @@ int read_data(int zrodlo_fd, unsigned short *data_buffer)
     return data_read;
 }
 
-int send_data(unsigned short *data_buffer, long int processed, long int total_read)
+int send_data(unsigned short *data_buffer, long int processed)
 {
-    //int remain_to_send = (total_read % DATA_BUFFER_SIZE) - (processed % DATA_BUFFER_SIZE);
-    int remain_to_send = DATA_BUFFER_SIZE - (processed % DATA_BUFFER_SIZE);
-    int data_sent = write(parent_to_child[1], data_buffer, remain_to_send);
+    int data_to_send = DATA_BUFFER_SIZE - (processed % DATA_BUFFER_SIZE);
+    if (wolumen * 2 - processed < DATA_BUFFER_SIZE)
+    {
+        // w ostatnim pakiecie wysylamy mniej
+        data_to_send = wolumen * 2 - processed;
+    }
+
+    int data_sent = write(parent_to_child[1], data_buffer, data_to_send);
     if (data_sent == -1 && errno == EAGAIN)
     {
         return 0;
