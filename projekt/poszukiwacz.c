@@ -14,9 +14,6 @@ typedef struct __attribute__((packed)) record
     pid_t pid;
 } RECORD;
 
-int ins = 0;  // DEBUG
-int dups = 0; // DEBUG
-
 // ------------------------------------------------------------------------- //
 
 int insert(unsigned short **data, int len, unsigned short k);
@@ -48,7 +45,6 @@ int main(int argc, char **argv)
     char *end = NULL;
     long int blok = strtol((const char *)(argv[1]), &end, 10);
 
-    // fprintf(stderr, "BLOK STRTOL: %ld\n", blok); // DEBUG
     // uwzglednienie jednostki argumentu <blok>
     int multiplier = 1;
     if (end != NULL)
@@ -84,8 +80,6 @@ int main(int argc, char **argv)
         exit(13);
     }
 
-    // fprintf(stderr, "LEN: %d\n", len); // DEBUG
-
     // inicjalizacja tablicy
     for (int i = 0; i < len; i++)
     {
@@ -93,8 +87,8 @@ int main(int argc, char **argv)
     }
 
     /*
-    Wykorzystuje tablice haszujaca z podwojnym haszowaniem, rozwiazywanie 
-    konfliktow poprzez adresowanie otwarte. Implementacja na podstawie 
+    Wykorzystuje tablice haszujaca, rozwiazywanie konfliktow poprzez 
+    adresowanie otwarte. Implementacja na podstawie 
     Thomas H. Cormen - "Wprowadzenie do algorytmow, Rozdzial 11"
     */
 
@@ -110,8 +104,6 @@ int main(int argc, char **argv)
     int write_res;
     for (int i = 0; i < blok; i++)
     {
-        // if (i % 100 == 0 || i > 32700)  // DEBUG
-        //     fprintf(stderr, "%d\n", i); // DEBUG
         res = read(STDIN_FILENO, &temp_x, sizeof(unsigned short));
         dprintf(debug_fd, "POSZUKIWACZ PID: %d PRZECZYTAL %d\n", getpid(), res); // DEBUG
         if (res == -1)
@@ -121,31 +113,23 @@ int main(int argc, char **argv)
         }
         else if (res == 0)
         {
-            break;
+            // pipe zostal zamkniety
+            return 13;
         }
-
-        // TODO: sprawdzic sytuacje, jesli pipe nie zdazyl zostac wypelniony przez
-        // kolekcjonera (tryb blokujacy, wiec chyba nic nie trzeba robic?)
 
         res = insert(data, len, temp_x);
         if (res == -1)
         {
-            dups++; // DEBUG
             duplicates += 1;
         }
         else if (res == 0)
         {
-            ins++; // DEBUG
             buffer.x = temp_x;
             write_res = write(STDOUT_FILENO, &buffer, sizeof(RECORD));
             if (write_res == -1)
             {
                 perror("Write error");
                 exit(11);
-            }
-            else if (write_res == 0)
-            {
-                break;
             }
         }
     }
@@ -161,7 +145,6 @@ int main(int argc, char **argv)
         result++;
     }
 
-    //fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups); // DEBUG
     return result;
 }
 
@@ -172,6 +155,7 @@ unsigned short hash(unsigned short k, int i, int len)
 
 int insert(unsigned short **data, int len, unsigned short k)
 {
+    // zwraca 0 jesli element jest unikalny, -1 jesli duplikat
     int i = 0;
     int j = 0;
     while (i != len)
@@ -206,7 +190,6 @@ int insert(unsigned short **data, int len, unsigned short k)
     wiecej elementow niz rozmiar tablicy). Mimo wszystko nalezy sie zabezpieczyc.
     */
     fprintf(stderr, "Hash table overflow.\n");
-    fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups);
     free_data(data, len);
     exit(14);
 }

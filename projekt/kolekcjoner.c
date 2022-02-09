@@ -10,8 +10,6 @@
 #include <sys/wait.h>
 #include <errno.h>
 
-int debug_fd; // DEBUG
-
 #define NANOSEC 1000000000L
 #define FL2NANOSEC(f)                          \
     {                                          \
@@ -34,16 +32,17 @@ char *sukcesy;             // -f <sukcesy>   sciezka do pliku osiagniec
 char *raporty;             // -l <raporty>   sciezka do pliku raportow
 unsigned long int wolumen; // -s <wolumen>   ilosc danych
 unsigned long int blok;    // -w <blok>      ilosc danych na potomka
-char *blok_str;
-unsigned long int prac; // -p <prac>      maksymalna liczba potomkow
+unsigned int prac;         // -p <prac>      maksymalna liczba potomkow
+char *blok_str;            // do przeslania parametru blok do potomka
 
 int parent_to_child[2]; // rodzic wysyla, potomek czyta
 int child_to_parent[2]; // rodzic czyta, potomek wysyla
 
-int death_counter = 0;
-int birth_counter = 0;
 int kids_alive;
 int num_of_successes = 0;
+
+int death_counter = 0;
+int birth_counter = 0;
 
 // ------------------------------------------------------------------------- //
 
@@ -59,8 +58,10 @@ int create_first_kids(int raporty_fd);
 void set_nonblock_mode();
 int read_args(int argc, char **argv);
 void initialize_zeros(int sukcesy_fd);
+unsigned long int calculate_unit(unsigned long int x, char *end);
 
-void read_data(int zrodlo_fd, unsigned short *data_buffer);
+int read_data(int zrodlo_fd, unsigned short *data_buffer);
+//int send_data(unsigned short *data_buffer, long int processed, int data_read);
 int send_data(unsigned short *data_buffer);
 void read_record();
 void save_record(int sukcesy_fd, RECORD *record_buffer);
@@ -69,13 +70,6 @@ void save_record(int sukcesy_fd, RECORD *record_buffer);
 
 int main(int argc, char **argv)
 {
-    debug_fd = open("./debug_file", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRWXU); // DEBUG
-    if (debug_fd == -1)
-    {
-        perror("DEBUG FILE ERROR\n");
-        exit(1);
-    }
-
     if (read_args(argc, argv) != 0)
     {
         fprintf(stderr, "Reading arguments error.\n");
@@ -88,7 +82,7 @@ int main(int argc, char **argv)
         exit(2);
     }
 
-    kids_alive = prac; // ustaw licznik potomkow
+    kids_alive = prac; // ustawienie licznika potomkow
 
     int zrodlo_fd, sukcesy_fd, raporty_fd;
     open_files(&zrodlo_fd, &sukcesy_fd, &raporty_fd);
@@ -141,39 +135,43 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
 
     int processed = 0; // liczba dotychczas wyslanych bajtow
     int data_sent;     // liczba bajtow wyslanych w danym przebiegu petli
+    int data_read;     // liczba bajtow odczytanych ze zrodla w danym przebiegu
     int pipe_open = 1; // stan parent_to_child[0]: 1 - otwarty, 0 - zamkniety
 
     // Petla dziala dopoki choc jeden potomek zyje, lub rodzic cos czyta z pipe'a
     while (kids_alive > 0 || record_read > 0)
     {
-        dprintf(debug_fd, "KIDS_ALIVE: %d, RECORD_READ: %d\n", kids_alive, record_read);
+        /*
+            Poniewaz wysylamy na raz duza porcje danych, a odczytujemy po jednym
+            rekordzie, chcemy czesciej odczytywac niz wysylac. 
+            W tym celu zliczamy liczbe wyslanych bajtow i nowa porcje
+            danych ze zrodla wczytujemy z krokiem modulo rozmiar bufora.
+        */
+
         // Wczytywanie nowej porcji danych, kiedy caly data_buffer zostal wyslany
         if (processed % DATA_BUFFER_SIZE == 0 && processed < wolumen * 2)
         {
-            dprintf(debug_fd, "%s", "READ DATA -------------------------\n");
-            read_data(zrodlo_fd, data_buffer);
+            data_read = read_data(zrodlo_fd, data_buffer);
         }
 
         if (processed < 2 * wolumen)
         {
             data_sent = send_data(data_buffer + (processed % DATA_BUFFER_SIZE) / 2);
             processed += data_sent;
-            dprintf(debug_fd, "SEND DATA: %d PROCESSED: %d\n", data_sent, processed);
         }
         else if (pipe_open == 1)
         {
-            printf("CLOSING PIPE\n");
+            // wyslano wszystkie dane
             int r = close(parent_to_child[1]);
             if (r == -1)
             {
                 perror("Closing pipe error");
                 exit(1);
             }
-            printf("CLOSED PIPE\n");
-            dprintf(debug_fd, "CLOSING PIPE----------------------------------------------------------------------------------------------------\n");
             pipe_open = 0;
         }
 
+        // wczytanie rekordu od potomka i zapisanie do pliku sukcesow
         record_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
         if (record_read == -1 && errno != EAGAIN)
         {
@@ -181,13 +179,13 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
             exit(1);
         }
 
-        dprintf(debug_fd, "RECORD READ: pid:%d x:%d\n", record_buffer.pid, record_buffer.x);
         if (record_read == sizeof(RECORD))
         {
             save_record(sukcesy_fd, &record_buffer);
         }
-        record_buffer.pid = 0; // DEBUG
-        record_buffer.x = 0;   // DEBUG
+
+        // warunek jest spelniony jesli w danym przebiegu zaden z potomkow
+        // nie umarl i jednoczesnie nic nie odczytano
         if (handle_deaths(raporty_fd, pipe_open) == -1 && record_read == -1)
         {
             sleep_res = clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &t, NULL);
@@ -198,12 +196,11 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
         }
     }
 
-    printf("DEATH COUNTER: %d\n", death_counter);      // DEBUG
-    printf("BIRTH COUNTER: %d\n", birth_counter);      // DEBUG
-    printf("TOTAL SUCCESSES: %d\n", num_of_successes); // DEBUG
-
-    close(child_to_parent[1]);
+    close(child_to_parent[0]);
     close_files(zrodlo_fd, sukcesy_fd, raporty_fd);
+
+    printf("DEATH COUNTER: %d\n", death_counter); // DEBUG
+    printf("BIRTH COUNTER: %d\n", birth_counter); // DEBUG
 }
 
 int handle_deaths(int raporty_fd, int pipe_open)
@@ -222,14 +219,21 @@ int handle_deaths(int raporty_fd, int pipe_open)
     int fork_result;
     struct timespec t;
     int clock_res;
+
+    /*
+    obsluga funkcji waitpid na podstawie:
+    https://www.ibm.com/docs/en/zos/2.4.0?topic=functions-waitpid-wait-specific-child-process-end
+    https://stackoverflow.com/questions/11322488/how-to-make-sure-that-waitpid-1-stat-wnohang-collect-all-children-process
+    */
+
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
     {
         result = result != -1 ? result + 1 : 1;
 
         if (WIFEXITED(status))
         {
-            kids_alive--;
             death_counter++;
+            kids_alive--;
             clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
             if (clock_res == -1)
             {
@@ -239,13 +243,15 @@ int handle_deaths(int raporty_fd, int pipe_open)
             write_report(raporty_fd, pid, "dead", &t);
 
             return_value = WEXITSTATUS(status);
-            dprintf(debug_fd, "PID: %d RETURN: %d\n", pid, return_value);
-            if (return_value >= 0 && return_value <= 10 && filled_slots < 0.75 && pipe_open)
+
+            // nowych potomkow tworzymy jesli ten ktory zginal nie zakonczyl
+            // sie bledem i wypenienie pliku sukcesow nie przekroczylo 75%
+            if (return_value <= 10 && filled_slots < 0.75)
             {
                 fork_result = fork();
                 if (fork_result == -1)
                 {
-                    perror("Fork in signal handler error.");
+                    perror("Fork in deaths handler error.");
                     exit(1);
                 }
                 else if (fork_result == 0)
@@ -254,6 +260,7 @@ int handle_deaths(int raporty_fd, int pipe_open)
                 }
                 else
                 {
+                    // proces rodzica, rejestracja utworzenia potomka
                     kids_alive++;
                     clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
                     if (clock_res == -1)
@@ -283,7 +290,8 @@ void initialize_report_headers(int raporty_fd)
 
 void write_report(int raporty_fd, int pid, char *note, struct timespec *t)
 {
-    dprintf(debug_fd, "%s %d\n", note, pid);
+    // na podstawie man printf oraz
+    // https://stackoverflow.com/questions/8304259/formatting-struct-timespec
     char *format = "%5d %4s %7ld.%-9ld\n";
     int res = dprintf(raporty_fd, format, pid, note, t->tv_sec, t->tv_nsec);
     if (res < 0)
@@ -337,6 +345,7 @@ int create_first_kids(int raporty_fd)
         }
         else
         {
+            // proces rodzica, rejestracja utworzenia potomka
             clock_res = clock_gettime(CLOCK_MONOTONIC, &t);
             if (clock_res == -1)
             {
@@ -360,6 +369,7 @@ int create_first_kids(int raporty_fd)
 
 void set_nonblock_mode()
 {
+    // na podstawie https://www.linuxtoday.com/blog/blocking-and-non-blocking-i-0/
     int nonblock_res = fcntl(parent_to_child[1], F_SETFL,
                              fcntl(parent_to_child[1], F_GETFL) | O_NONBLOCK);
     if (nonblock_res == -1)
@@ -376,7 +386,7 @@ void set_nonblock_mode()
     }
 }
 
-void read_data(int zrodlo_fd, unsigned short *data_buffer)
+int read_data(int zrodlo_fd, unsigned short *data_buffer)
 {
     int data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_SIZE);
     if (data_read == -1)
@@ -384,16 +394,20 @@ void read_data(int zrodlo_fd, unsigned short *data_buffer)
         perror("Error reading data from source\n");
         exit(1);
     }
+    return data_read;
 }
 
 int send_data(unsigned short *data_buffer)
 {
     int data_sent = write(parent_to_child[1], data_buffer, DATA_BUFFER_SIZE);
-    if (data_sent == -1)
+    if (data_sent == -1 && errno == EAGAIN)
     {
-        dprintf(debug_fd, "%s\n", "Pipe full");
-        //TODO: check value from write
         return 0;
+    }
+    else if (data_sent == -1 && errno != EAGAIN)
+    {
+        perror("Error while writing parent to child");
+        exit(1);
     }
     else
     {
@@ -401,16 +415,11 @@ int send_data(unsigned short *data_buffer)
     }
 }
 
-void read_record()
-{
-}
-
 void save_record(int sukcesy_fd, RECORD *record_buffer)
 {
-    dprintf(debug_fd, "SAVE RECORD FUNC\n");
     pid_t pid_buffer;
     int record_written;
-    //printf("R - pid: %d x: %d\n", record_buffer.pid, record_buffer.x); // DEBUG
+
     // przesuniecie na odpowiedni indeks
     off_t index = lseek(sukcesy_fd, record_buffer->x * sizeof(pid_t), SEEK_SET);
     if (index == -1)
@@ -420,9 +429,9 @@ void save_record(int sukcesy_fd, RECORD *record_buffer)
     }
 
     /*
-            Sprawdzenie czy komorka jest pusta - jesli tak, cofniecie sie na jej
-            poczatek i wpisanie pid. Jesli nie, nic nie wpisujemy.
-            */
+    Sprawdzenie czy komorka jest pusta - jesli tak, cofniecie sie na jej
+    poczatek i wpisanie pid. Jesli nie, nic nie wpisujemy.
+    */
 
     int slot_read = read(sukcesy_fd, &pid_buffer, sizeof(pid_t));
     if (slot_read == -1)
@@ -430,11 +439,9 @@ void save_record(int sukcesy_fd, RECORD *record_buffer)
         perror("Slot read error");
         exit(1);
     }
-    dprintf(debug_fd, "SAVE RECORD FUNC: pid_buffer %d\n", pid_buffer);
 
     if (pid_buffer == 0)
     {
-        dprintf(debug_fd, "SAVE RECORD FUNC: pusta\n");
         // komorka jest pusta
         index = lseek(sukcesy_fd, -1 * sizeof(pid_t), SEEK_CUR);
         record_written = write(sukcesy_fd, &record_buffer->pid, sizeof(pid_t));
@@ -445,18 +452,16 @@ void save_record(int sukcesy_fd, RECORD *record_buffer)
         }
         num_of_successes++; // aktualizowanie zapelnienia pliku sukcesy
     }
-    else
-    {
-        dprintf(debug_fd, "SAVE RECORD FUNC: nie pusta\n");
-    }
 }
 
 int read_args(int argc, char **argv)
 {
+    /*
+    Sprawdzanie case '?' oraz optind < argc zaczerpnięte z
+    The GNU C Library Reference Manual 25.2.2 Example of Parsing Arguments with getopt
+    */
     int option;
     char *end;
-    char *invalid_arg = NULL;
-    int multiplier = 1;
 
     while ((option = getopt(argc, argv, "d:s:w:f:l:p:")) != -1)
     {
@@ -467,44 +472,12 @@ int read_args(int argc, char **argv)
             break;
         case 's':
             wolumen = strtoul(optarg, &end, 10);
-            multiplier = 1;
-            if (end != NULL)
-            {
-                if (strcmp(end, "Ki") == 0)
-                {
-                    multiplier = 1024;
-                }
-                else if (strcmp(end, "Mi") == 0)
-                {
-                    multiplier = 1024 * 1024;
-                }
-                else if (*end != '\0')
-                {
-                    fprintf(stderr, "Argument has a wrong format.\n");
-                }
-            }
-            wolumen *= multiplier;
+            wolumen = calculate_unit(wolumen, end);
             break;
         case 'w':
             blok_str = optarg;
             blok = strtoul(optarg, &end, 10);
-            multiplier = 1;
-            if (end != NULL)
-            {
-                if (strcmp(end, "Ki") == 0)
-                {
-                    multiplier = 1024;
-                }
-                else if (strcmp(end, "Mi") == 0)
-                {
-                    multiplier = 1024 * 1024;
-                }
-                else if (*end != '\0')
-                {
-                    fprintf(stderr, "Argument has a wrong format.\n");
-                }
-            }
-            blok *= multiplier;
+            blok = calculate_unit(blok, end);
             break;
         case 'f':
             sukcesy = optarg;
@@ -516,21 +489,15 @@ int read_args(int argc, char **argv)
             prac = (unsigned int)strtoul(optarg, &end, 10);
             if (*end != '\0')
             {
-                invalid_arg = optarg;
+                fprintf(stderr, "Invalid argument: prac\n");
+                return 1;
             }
             break;
         case '?':
             return 1;
         }
-
-        if (invalid_arg != NULL)
-        {
-            fprintf(stderr, "Invalid argument: %s. ", invalid_arg);
-            return 1;
-        }
     }
 
-    // Ponizsze sprawdzanie zapozyczone z manuala.
     if (optind < argc)
     {
         fprintf(stderr, "Too many arguments. ");
@@ -540,8 +507,31 @@ int read_args(int argc, char **argv)
     return 0;
 }
 
+unsigned long int calculate_unit(unsigned long int x, char *end)
+{
+    int multiplier = 1;
+    if (end != NULL)
+    {
+        if (strcmp(end, "Ki") == 0)
+        {
+            multiplier = 1024;
+        }
+        else if (strcmp(end, "Mi") == 0)
+        {
+            multiplier = 1024 * 1024;
+        }
+        else if (*end != '\0')
+        {
+            fprintf(stderr, "Argument has a wrong format.\n");
+            exit(1);
+        }
+    }
+    return x * multiplier;
+}
+
 void initialize_zeros(int sukcesy_fd)
 {
+    // zrodlo: man 2 truncate
     int res = ftruncate(sukcesy_fd, MAX_USHORT * 2);
     if (res == -1)
     {
