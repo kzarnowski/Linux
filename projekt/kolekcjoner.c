@@ -22,7 +22,7 @@ typedef struct __attribute__((packed)) record
     pid_t pid;
 } RECORD;
 
-#define DATA_BUFFER_SIZE 1000
+#define DATA_BUFFER_SIZE 512
 #define MAX_USHORT 65535 // 2^16 - 1
 
 // ------------------------------------------------------------------------- //
@@ -54,6 +54,7 @@ void initialize_report_headers(int raporty_fd);
 int handle_deaths(int raporty_fd, int pipe_open);
 void open_files(int *zrodlo_fd, int *sukcesy_fd, int *raporty_fd);
 void close_files(int zrodlo_fd, int sukcesy_fd, int raporty_fd);
+void close_fd(int fd);
 int create_first_kids(int raporty_fd);
 void set_nonblock_mode();
 int read_args(int argc, char **argv);
@@ -62,7 +63,7 @@ unsigned long int calculate_unit(unsigned long int x, char *end);
 
 int read_data(int zrodlo_fd, unsigned short *data_buffer);
 //int send_data(unsigned short *data_buffer, long int processed, int data_read);
-int send_data(unsigned short *data_buffer);
+int send_data(unsigned short *data_buffer, long int processed, long int total_read);
 void read_record();
 void save_record(int sukcesy_fd, RECORD *record_buffer);
 
@@ -110,8 +111,8 @@ void child()
     dup2(parent_to_child[0], STDIN_FILENO);
     dup2(child_to_parent[1], STDOUT_FILENO);
 
-    close(parent_to_child[0]);
-    close(child_to_parent[1]);
+    close_fd(parent_to_child[0]);
+    close_fd(child_to_parent[1]);
 
     char *args[] = {"./poszukiwacz", blok_str, NULL};
     int exec_res = execvp(args[0], args);
@@ -133,10 +134,11 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     unsigned short data_buffer[DATA_BUFFER_SIZE / 2];
     const struct timespec t = FL2NANOSEC(0.48);
 
-    int processed = 0; // liczba dotychczas wyslanych bajtow
-    int data_sent;     // liczba bajtow wyslanych w danym przebiegu petli
-    int data_read;     // liczba bajtow odczytanych ze zrodla w danym przebiegu
-    int pipe_open = 1; // stan parent_to_child[0]: 1 - otwarty, 0 - zamkniety
+    long int processed = 0;  // liczba dotychczas wyslanych bajtow
+    int data_sent;           // liczba bajtow wyslanych w danym przebiegu petli
+    int data_read;           // liczba bajtow odczytanych ze zrodla w danym przebiegu
+    int pipe_open = 1;       // stan parent_to_child[0]: 1 - otwarty, 0 - zamkniety
+    long int total_read = 0; // liczba wszystkich wczytanych bajtow
 
     // Petla dziala dopoki choc jeden potomek zyje, lub rodzic cos czyta z pipe'a
     while (kids_alive > 0 || record_read > 0)
@@ -149,25 +151,22 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
         */
 
         // Wczytywanie nowej porcji danych, kiedy caly data_buffer zostal wyslany
-        if (processed % DATA_BUFFER_SIZE == 0 && processed < wolumen * 2)
+        if (processed % DATA_BUFFER_SIZE == 0 && /*processed < wolumen * 2*/ total_read < 2 * wolumen)
         {
             data_read = read_data(zrodlo_fd, data_buffer);
+            total_read += data_read;
+            printf("TOTAL READ: %ld, DATA READ: %d\n", total_read, data_read);
         }
 
         if (processed < 2 * wolumen)
         {
-            data_sent = send_data(data_buffer + (processed % DATA_BUFFER_SIZE) / 2);
+            data_sent = send_data(data_buffer + (processed % DATA_BUFFER_SIZE) / 2, processed, total_read);
             processed += data_sent;
         }
         else if (pipe_open == 1)
         {
             // wyslano wszystkie dane
-            int r = close(parent_to_child[1]);
-            if (r == -1)
-            {
-                perror("Closing pipe error");
-                exit(1);
-            }
+            close_fd(parent_to_child[1]);
             pipe_open = 0;
         }
 
@@ -196,7 +195,7 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
         }
     }
 
-    close(child_to_parent[0]);
+    close_fd(child_to_parent[0]);
     close_files(zrodlo_fd, sukcesy_fd, raporty_fd);
 
     printf("DEATH COUNTER: %d\n", death_counter); // DEBUG
@@ -397,9 +396,11 @@ int read_data(int zrodlo_fd, unsigned short *data_buffer)
     return data_read;
 }
 
-int send_data(unsigned short *data_buffer)
+int send_data(unsigned short *data_buffer, long int processed, long int total_read)
 {
-    int data_sent = write(parent_to_child[1], data_buffer, DATA_BUFFER_SIZE);
+    //int remain_to_send = (total_read % DATA_BUFFER_SIZE) - (processed % DATA_BUFFER_SIZE);
+    int remain_to_send = DATA_BUFFER_SIZE - (processed % DATA_BUFFER_SIZE);
+    int data_sent = write(parent_to_child[1], data_buffer, remain_to_send);
     if (data_sent == -1 && errno == EAGAIN)
     {
         return 0;
@@ -543,6 +544,7 @@ void initialize_zeros(int sukcesy_fd)
 void close_files(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
 {
     int res;
+
     res = close(zrodlo_fd);
     if (res == -1)
     {
@@ -561,6 +563,15 @@ void close_files(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     if (res == -1)
     {
         perror("Error while closing file: raporty");
+        exit(1);
+    }
+}
+
+void close_fd(int fd)
+{
+    if (close(fd) == -1)
+    {
+        perror("Error while closing pipe");
         exit(1);
     }
 }
