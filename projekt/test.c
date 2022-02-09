@@ -16,7 +16,14 @@ int main(int argc, char **argv)
     unsigned short buffer[SIZE];
     for (int i; i < SIZE; i++)
     {
-        buffer[i] = i;
+        if (i % 5 == 0)
+        {
+            buffer[i] = i;
+        }
+        else
+        {
+            buffer[i] = i / 10 + 5;
+        }
     }
 
     int res = write(fd, buffer, SIZE * sizeof(unsigned short));

@@ -456,6 +456,7 @@ int read_args(int argc, char **argv)
     int option;
     char *end;
     char *invalid_arg = NULL;
+    int multiplier = 1;
 
     while ((option = getopt(argc, argv, "d:s:w:f:l:p:")) != -1)
     {
@@ -466,18 +467,44 @@ int read_args(int argc, char **argv)
             break;
         case 's':
             wolumen = strtoul(optarg, &end, 10);
-            if (*end != '\0')
+            multiplier = 1;
+            if (end != NULL)
             {
-                invalid_arg = optarg;
+                if (strcmp(end, "Ki") == 0)
+                {
+                    multiplier = 1024;
+                }
+                else if (strcmp(end, "Mi") == 0)
+                {
+                    multiplier = 1024 * 1024;
+                }
+                else if (*end != '\0')
+                {
+                    fprintf(stderr, "Argument has a wrong format.\n");
+                }
             }
+            wolumen *= multiplier;
             break;
         case 'w':
             blok_str = optarg;
             blok = strtoul(optarg, &end, 10);
-            if (*end != '\0')
+            multiplier = 1;
+            if (end != NULL)
             {
-                invalid_arg = optarg;
+                if (strcmp(end, "Ki") == 0)
+                {
+                    multiplier = 1024;
+                }
+                else if (strcmp(end, "Mi") == 0)
+                {
+                    multiplier = 1024 * 1024;
+                }
+                else if (*end != '\0')
+                {
+                    fprintf(stderr, "Argument has a wrong format.\n");
+                }
             }
+            blok *= multiplier;
             break;
         case 'f':
             sukcesy = optarg;
