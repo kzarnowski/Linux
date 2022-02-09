@@ -8,6 +8,7 @@
 #include <time.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 int debug_fd; // DEBUG
 
@@ -145,6 +146,7 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     // Petla dziala dopoki choc jeden potomek zyje, lub rodzic cos czyta z pipe'a
     while (kids_alive > 0 || record_read > 0)
     {
+        dprintf(debug_fd, "KIDS_ALIVE: %d, RECORD_READ: %d\n", kids_alive, record_read);
         // Wczytywanie nowej porcji danych, kiedy caly data_buffer zostal wyslany
         if (processed % DATA_BUFFER_SIZE == 0 && processed < wolumen * 2)
         {
@@ -160,17 +162,32 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
         }
         else if (pipe_open == 1)
         {
-            printf("PROCESSED: %d, WOLUMEN: %ld, CLOSING PIPE\n", processed, wolumen);
-            close(parent_to_child[0]);
+            printf("CLOSING PIPE\n");
+            int r = close(parent_to_child[1]);
+            if (r == -1)
+            {
+                perror("Closing pipe error");
+                exit(1);
+            }
+            printf("CLOSED PIPE\n");
+            dprintf(debug_fd, "CLOSING PIPE----------------------------------------------------------------------------------------------------\n");
             pipe_open = 0;
         }
 
         record_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
+        if (record_read == -1 && errno != EAGAIN)
+        {
+            perror("record read error");
+            exit(1);
+        }
+
         dprintf(debug_fd, "RECORD READ: pid:%d x:%d\n", record_buffer.pid, record_buffer.x);
         if (record_read == sizeof(RECORD))
         {
             save_record(sukcesy_fd, &record_buffer);
         }
+        record_buffer.pid = 0; // DEBUG
+        record_buffer.x = 0;   // DEBUG
         if (handle_deaths(raporty_fd, pipe_open) == -1 && record_read == -1)
         {
             sleep_res = clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &t, NULL);
@@ -222,7 +239,8 @@ int handle_deaths(int raporty_fd, int pipe_open)
             write_report(raporty_fd, pid, "dead", &t);
 
             return_value = WEXITSTATUS(status);
-            if (return_value <= 10 && filled_slots < 0.75 && pipe_open)
+            dprintf(debug_fd, "PID: %d RETURN: %d\n", pid, return_value);
+            if (return_value >= 0 && return_value <= 10 && filled_slots < 0.75 && pipe_open)
             {
                 fork_result = fork();
                 if (fork_result == -1)

@@ -27,6 +27,8 @@ void free_data(unsigned short **data, int len);
 
 int main(int argc, char **argv)
 {
+    int debug_fd = open("./debug_file", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRWXU); // DEBUG
+
     // sprawdzenie czy jest podpiete do potoku
     struct stat stdin_stats;
     fstat(STDIN_FILENO, &stdin_stats);
@@ -105,11 +107,13 @@ int main(int argc, char **argv)
     // wczytywanie danych z stdin i wysyłanie na stdout, jesli liczba pojawila
     // sie po raz pierwszy
 
+    int write_res;
     for (int i = 0; i < blok; i++)
     {
         // if (i % 100 == 0 || i > 32700)  // DEBUG
         //     fprintf(stderr, "%d\n", i); // DEBUG
         res = read(STDIN_FILENO, &temp_x, sizeof(unsigned short));
+        dprintf(debug_fd, "POSZUKIWACZ PID: %d PRZECZYTAL %d\n", getpid(), res); // DEBUG
         if (res == -1)
         {
             perror("Error while reading a number.");
@@ -133,7 +137,16 @@ int main(int argc, char **argv)
         {
             ins++; // DEBUG
             buffer.x = temp_x;
-            write(STDOUT_FILENO, &buffer, sizeof(RECORD));
+            write_res = write(STDOUT_FILENO, &buffer, sizeof(RECORD));
+            if (write_res == -1)
+            {
+                perror("Write error");
+                exit(11);
+            }
+            else if (write_res == 0)
+            {
+                break;
+            }
         }
     }
 
