@@ -24,11 +24,14 @@ void free_data(unsigned short **data, int len);
 
 int main(int argc, char **argv)
 {
-    int debug_fd = open("./debug_file", O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, S_IRWXU); // DEBUG
-
     // sprawdzenie czy jest podpiete do potoku
     struct stat stdin_stats;
-    fstat(STDIN_FILENO, &stdin_stats);
+    int stat_res = fstat(STDIN_FILENO, &stdin_stats);
+    if (stat_res == -1)
+    {
+        perror("Error while executing fstat");
+        exit(11);
+    }
     if (!S_ISFIFO(stdin_stats.st_mode))
     {
         fprintf(stderr, "%d STDIN is not connected to any pipe.\n", getpid());
@@ -65,6 +68,10 @@ int main(int argc, char **argv)
     blok *= multiplier;
 
     /*
+    Wykorzystuje tablice haszujaca, rozwiazywanie konfliktow poprzez 
+    adresowanie otwarte. Implementacja na podstawie 
+    Thomas H. Cormen - "Wprowadzenie do algorytmow, Rozdzial 11"
+
     Tablica bedzie przechowywac tylko unikalne wartosci zmiennej unsigned short, 
     wiec jej rozmiar nie musi byc wiekszy niz najwieksza dodatnia liczba 2-bajtowa
     + 1 miejsce na liczbe 0
@@ -86,12 +93,6 @@ int main(int argc, char **argv)
         data[i] = NULL;
     }
 
-    /*
-    Wykorzystuje tablice haszujaca, rozwiazywanie konfliktow poprzez 
-    adresowanie otwarte. Implementacja na podstawie 
-    Thomas H. Cormen - "Wprowadzenie do algorytmow, Rozdzial 11"
-    */
-
     unsigned long int duplicates = 0;
     int res = 0;
     unsigned short temp_x;
@@ -105,16 +106,15 @@ int main(int argc, char **argv)
     for (int i = 0; i < blok; i++)
     {
         res = read(STDIN_FILENO, &temp_x, sizeof(unsigned short));
-        dprintf(debug_fd, "POSZUKIWACZ PID: %d PRZECZYTAL %d\n", getpid(), res); // DEBUG
         if (res == -1)
         {
             perror("Error while reading a number.");
-            exit(13);
+            exit(14);
         }
         else if (res == 0)
         {
-            // pipe zostal zamkniety
-            return 13;
+            // pipe jest pusty
+            return 14;
         }
 
         res = insert(data, len, temp_x);
@@ -129,7 +129,7 @@ int main(int argc, char **argv)
             if (write_res == -1)
             {
                 perror("Write error");
-                exit(11);
+                exit(15);
             }
         }
     }
@@ -168,7 +168,7 @@ int insert(unsigned short **data, int len, unsigned short k)
             if (data[j] == NULL)
             {
                 fprintf(stderr, "Hash table malloc error.\n");
-                exit(14);
+                exit(16);
             }
             *data[j] = k;
             return 0;
@@ -191,7 +191,7 @@ int insert(unsigned short **data, int len, unsigned short k)
     */
     fprintf(stderr, "Hash table overflow.\n");
     free_data(data, len);
-    exit(14);
+    exit(17);
 }
 
 void free_data(unsigned short **data, int len)

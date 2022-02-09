@@ -40,15 +40,15 @@ int child_to_parent[2]; // rodzic czyta, potomek wysyla
 
 int kids_alive;
 int num_of_successes = 0;
+int pipe_open = 1; // stan parent_to_child[0]: 1 - otwarty, 0 - zamkniety
 
-int death_counter = 0;
-int birth_counter = 0;
+int death_counter = 0; // do statystyk
+int birth_counter = 0; // do statystyk
 
 // ------------------------------------------------------------------------- //
 
 void child();
 void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd);
-void signal_register(int signum, void *func, struct sigaction *sa);
 void write_report(int raporty_fd, int pid, char *note, struct timespec *t);
 void initialize_report_headers(int raporty_fd);
 int handle_deaths(int raporty_fd, int pipe_open);
@@ -62,9 +62,7 @@ void initialize_zeros(int sukcesy_fd);
 unsigned long int calculate_unit(unsigned long int x, char *end);
 
 int read_data(int zrodlo_fd, unsigned short *data_buffer, long int total_read);
-//int send_data(unsigned short *data_buffer, long int processed, int data_read);
-int send_data(unsigned short *data_buffer, long int processed);
-void read_record();
+int send_data(unsigned short *data_buffer, long int total_sent);
 void save_record(int sukcesy_fd, RECORD *record_buffer);
 
 // ------------------------------------------------------------------------- //
@@ -104,12 +102,25 @@ int main(int argc, char **argv)
 
 void child()
 {
-
-    close(parent_to_child[1]);
-    close(child_to_parent[0]);
+    int res;
+    if (pipe_open)
+    {
+        close_fd(parent_to_child[1]);
+    }
+    close_fd(child_to_parent[0]);
     // write: child_to_parent, read: parent_to_child
-    dup2(parent_to_child[0], STDIN_FILENO);
-    dup2(child_to_parent[1], STDOUT_FILENO);
+    res = dup2(parent_to_child[0], STDIN_FILENO);
+    if (res == -1)
+    {
+        perror("dup error");
+        exit(1);
+    }
+    res = dup2(child_to_parent[1], STDOUT_FILENO);
+    if (res == -1)
+    {
+        perror("dup error");
+        exit(1);
+    }
 
     close_fd(parent_to_child[0]);
     close_fd(child_to_parent[1]);
@@ -134,11 +145,10 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     unsigned short data_buffer[DATA_BUFFER_SIZE / 2];
     const struct timespec t = FL2NANOSEC(0.48);
 
-    long int processed = 0;  // liczba dotychczas wyslanych bajtow
+    long int total_sent = 0; // liczba wszystkich dotychczas wyslanych bajtow
     int data_sent;           // liczba bajtow wyslanych w danym przebiegu petli
+    long int total_read = 0; // liczba wszystkich dotychczas wczytanych bajtow
     int data_read;           // liczba bajtow odczytanych ze zrodla w danym przebiegu
-    int pipe_open = 1;       // stan parent_to_child[0]: 1 - otwarty, 0 - zamkniety
-    long int total_read = 0; // liczba wszystkich wczytanych bajtow
 
     // Petla dziala dopoki choc jeden potomek zyje, lub rodzic cos czyta z pipe'a
     while (kids_alive > 0 || record_read > 0)
@@ -151,18 +161,17 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
         */
 
         // Wczytywanie nowej porcji danych, kiedy caly data_buffer zostal wyslany
-        if (processed % DATA_BUFFER_SIZE == 0 && /*processed < wolumen * 2*/ total_read < 2 * wolumen)
+        if (total_sent % DATA_BUFFER_SIZE == 0 && total_read < 2 * wolumen)
         {
             data_read = read_data(zrodlo_fd, data_buffer, total_read);
             total_read += data_read;
-            printf("TOTAL READ: %ld, DATA READ: %d\n", total_read, data_read);
         }
 
-        if (processed < 2 * wolumen)
+        // Wysylanie danych do potomkow
+        if (total_sent < 2 * wolumen)
         {
-            data_sent = send_data(data_buffer + (processed % DATA_BUFFER_SIZE) / 2, processed);
-            processed += data_sent;
-            printf("TOTAL SENT: %ld, DATA SENT: %d\n", processed, data_sent);
+            data_sent = send_data(data_buffer, total_sent);
+            total_sent += data_sent;
         }
         else if (pipe_open == 1)
         {
@@ -171,7 +180,7 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
             pipe_open = 0;
         }
 
-        // wczytanie rekordu od potomka i zapisanie do pliku sukcesow
+        // Wczytanie rekordu od potomka i zapisanie do pliku sukcesow
         record_read = read(child_to_parent[0], &record_buffer, sizeof(RECORD));
         if (record_read == -1 && errno != EAGAIN)
         {
@@ -199,8 +208,12 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     close_fd(child_to_parent[0]);
     close_files(zrodlo_fd, sukcesy_fd, raporty_fd);
 
-    printf("DEATH COUNTER: %d\n", death_counter); // DEBUG
-    printf("BIRTH COUNTER: %d\n", birth_counter); // DEBUG
+    // STATYSTYKI:
+    // printf("TOTAL READ: %ld\n", total_read);
+    // printf("TOTAL SENT: %ld\n", total_sent);
+    // printf("DEATH COUNTER: %d\n", death_counter);
+    // printf("BIRTH COUNTER: %d\n", birth_counter);
+    // printf("REPORTS WRITTEN: %d\n", num_of_successes);
 }
 
 int handle_deaths(int raporty_fd, int pipe_open)
@@ -403,16 +416,17 @@ int read_data(int zrodlo_fd, unsigned short *data_buffer, long int total_read)
     return data_read;
 }
 
-int send_data(unsigned short *data_buffer, long int processed)
+int send_data(unsigned short *data_buffer, long int total_sent)
 {
-    int data_to_send = DATA_BUFFER_SIZE - (processed % DATA_BUFFER_SIZE);
-    if (wolumen * 2 - processed < DATA_BUFFER_SIZE)
+    int data_to_send = DATA_BUFFER_SIZE - (total_sent % DATA_BUFFER_SIZE);
+    unsigned short *offset = data_buffer + (total_sent % DATA_BUFFER_SIZE) / 2;
+    if (wolumen * 2 - total_sent < DATA_BUFFER_SIZE)
     {
         // w ostatnim pakiecie wysylamy mniej
-        data_to_send = wolumen * 2 - processed;
+        data_to_send = wolumen * 2 - total_sent;
     }
 
-    int data_sent = write(parent_to_child[1], data_buffer, data_to_send);
+    int data_sent = write(parent_to_child[1], offset, data_to_send);
     if (data_sent == -1 && errno == EAGAIN)
     {
         return 0;
@@ -484,10 +498,20 @@ int read_args(int argc, char **argv)
             zrodlo = optarg;
             break;
         case 's':
+            if (optarg[0] == '-')
+            {
+                fprintf(stderr, "Wolumen must be greater than 0\n");
+                return 1;
+            }
             wolumen = strtoul(optarg, &end, 10);
             wolumen = calculate_unit(wolumen, end);
             break;
         case 'w':
+            if (optarg[0] == '-')
+            {
+                fprintf(stderr, "Blok must be greater than 0\n");
+                return 1;
+            }
             blok_str = optarg;
             blok = strtoul(optarg, &end, 10);
             blok = calculate_unit(blok, end);
@@ -499,6 +523,11 @@ int read_args(int argc, char **argv)
             raporty = optarg;
             break;
         case 'p':
+            if (optarg[0] == '-')
+            {
+                fprintf(stderr, "Blok must be greater than 0\n");
+                return 1;
+            }
             prac = (unsigned int)strtoul(optarg, &end, 10);
             if (*end != '\0')
             {
