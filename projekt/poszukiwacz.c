@@ -32,7 +32,7 @@ int main(int argc, char **argv)
     fstat(STDIN_FILENO, &stdin_stats);
     if (!S_ISFIFO(stdin_stats.st_mode))
     {
-        fprintf(stderr, "STDIN is not connected to any pipe.\n");
+        fprintf(stderr, "%d STDIN is not connected to any pipe.\n", getpid());
         exit(11);
     }
 
@@ -115,6 +115,10 @@ int main(int argc, char **argv)
             perror("Error while reading a number.");
             exit(13);
         }
+        else if (res == 0)
+        {
+            break;
+        }
 
         // TODO: sprawdzic sytuacje, jesli pipe nie zdazyl zostac wypelniony przez
         // kolekcjonera (tryb blokujacy, wiec chyba nic nie trzeba robic?)
@@ -144,7 +148,7 @@ int main(int argc, char **argv)
         result++;
     }
 
-    fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups); // DEBUG
+    //fprintf(stderr, "INS: %d, DUPS: %d.\n", ins, dups); // DEBUG
     return result;
 }
 
