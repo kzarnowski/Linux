@@ -53,6 +53,7 @@ void write_report(int raporty_fd, int pid, char *note, struct timespec *t);
 void initialize_report_headers(int raporty_fd);
 int handle_deaths(int raporty_fd, int pipe_open);
 void open_files(int *zrodlo_fd, int *sukcesy_fd, int *raporty_fd);
+void close_files(int zrodlo_fd, int sukcesy_fd, int raporty_fd);
 int create_first_kids(int raporty_fd);
 void set_nonblock_mode();
 int read_args(int argc, char **argv);
@@ -135,15 +136,16 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     int record_read;      // do odczytania danych od potomkow
     RECORD record_buffer; // do odczytania rekordu od potomka
     unsigned short data_buffer[DATA_BUFFER_SIZE / 2];
-    const struct timespec t = FL2NANOSEC(5.48);
+    const struct timespec t = FL2NANOSEC(0.48);
 
-    int processed = 0;
-    int data_sent;
-    int pipe_open = 1;
+    int processed = 0; // liczba dotychczas wyslanych bajtow
+    int data_sent;     // liczba bajtow wyslanych w danym przebiegu petli
+    int pipe_open = 1; // stan parent_to_child[0]: 1 - otwarty, 0 - zamkniety
 
-    while (kids_alive > 0 /* OR THERE IS STILL STH TO READ ??*/)
+    // Petla dziala dopoki choc jeden potomek zyje, lub rodzic cos czyta z pipe'a
+    while (kids_alive > 0 || record_read > 0)
     {
-
+        // Wczytywanie nowej porcji danych, kiedy caly data_buffer zostal wyslany
         if (processed % DATA_BUFFER_SIZE == 0 && processed < wolumen * 2)
         {
             dprintf(debug_fd, "%s", "READ DATA -------------------------\n");
@@ -184,7 +186,7 @@ void parent(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
     printf("TOTAL SUCCESSES: %d\n", num_of_successes); // DEBUG
 
     close(child_to_parent[1]);
-    //close(parent_to_child[0]);
+    close_files(zrodlo_fd, sukcesy_fd, raporty_fd);
 }
 
 int handle_deaths(int raporty_fd, int pipe_open)
@@ -361,8 +363,8 @@ void read_data(int zrodlo_fd, unsigned short *data_buffer)
     int data_read = read(zrodlo_fd, data_buffer, DATA_BUFFER_SIZE);
     if (data_read == -1)
     {
-        printf("Error reading data from source\n");
-        //TODO: check value from read
+        perror("Error reading data from source\n");
+        exit(1);
     }
 }
 
@@ -499,6 +501,31 @@ void initialize_zeros(int sukcesy_fd)
     if (res == -1)
     {
         perror("Error while initializing file with zeros.");
+        exit(1);
+    }
+}
+
+void close_files(int zrodlo_fd, int sukcesy_fd, int raporty_fd)
+{
+    int res;
+    res = close(zrodlo_fd);
+    if (res == -1)
+    {
+        perror("Error while closing file: zrodlo");
+        exit(1);
+    }
+
+    res = close(sukcesy_fd);
+    if (res == -1)
+    {
+        perror("Error while closing file: sukcesy");
+        exit(1);
+    }
+
+    res = close(raporty_fd);
+    if (res == -1)
+    {
+        perror("Error while closing file: raporty");
         exit(1);
     }
 }
